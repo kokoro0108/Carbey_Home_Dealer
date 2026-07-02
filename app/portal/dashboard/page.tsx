@@ -66,7 +66,7 @@ export default async function MemberDashboardPage() {
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* オンボーディング進捗 */}
         <Card className="lg:col-span-2">
-          <CardHeader title="スタートアップ進捗" action={<span className="text-xs text-slate-400">フロー本体は Phase 2</span>} />
+          <CardHeader title="スタートアップ進捗" action={<Link href="/portal/onboarding" className="flex items-center gap-1 text-xs font-medium text-info-600 hover:underline">詳細を見る <ArrowRight className="h-3 w-3" /></Link>} />
           <CardBody>
             <div className="mb-2 flex items-end justify-between">
               <span className="text-3xl font-bold text-slate-900">{onboardingPct}<span className="text-lg text-slate-400">%</span></span>

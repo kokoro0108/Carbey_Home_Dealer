@@ -48,6 +48,29 @@ export async function markAllAdminRead(): Promise<void> {
   if (error) throw new Error(error.message)
 }
 
+/** 特定ユーザー宛て通知の未読数（加盟店の通知ベル用）。 */
+export async function unreadUserCount(userId: string): Promise<number> {
+  const supabase = createServiceRoleClient()
+  const { count, error } = await supabase
+    .from('notifications')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .eq('is_read', false)
+  if (error) throw new Error(error.message)
+  return count ?? 0
+}
+
+/** 特定ユーザー宛て通知をすべて既読化。 */
+export async function markAllUserRead(userId: string): Promise<void> {
+  const supabase = createServiceRoleClient()
+  const { error } = await supabase
+    .from('notifications')
+    .update({ is_read: true } as never)
+    .eq('user_id', userId)
+    .eq('is_read', false)
+  if (error) throw new Error(error.message)
+}
+
 /** 通知を作成 (新規会員登録・入金確認など)。 */
 export async function notifyAdmin(kind: string, title: string, message?: string): Promise<void> {
   const supabase = createServiceRoleClient()

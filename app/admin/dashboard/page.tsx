@@ -13,7 +13,8 @@ import {
   CheckCircle2,
 } from 'lucide-react'
 import { getAdminStats } from '@/lib/portal/dashboard'
-import { yen } from '@/lib/portal/labels'
+import { yen, ORDER_STATUS_LABEL, ORDER_STATUS_TONE } from '@/lib/portal/labels'
+import { listOrders } from '@/lib/portal/orders'
 import { StatCard } from '@/components/ui/StatCard'
 import { Card, CardHeader, CardBody } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
@@ -105,9 +106,20 @@ const CHATS = [
 const DONUT_COLORS = ['#fb2c1d', '#1d5cf0', '#06b6d4', '#f59e0b', '#94a3b8']
 
 export default async function AdminDashboardPage() {
-  const stats = await getAdminStats()
+  const [stats, recentOrders] = await Promise.all([getAdminStats(), listOrders()])
   const m = stats.members
   const totalContracts = stats.planDistribution.reduce((s, p) => s + p.count, 0)
+
+  // 実オーダーがあれば実データ、無ければデモ用ダミーを表示
+  const orderRows = recentOrders.length > 0
+    ? recentOrders.slice(0, 5).map((o) => ({
+        id: o.order_number ?? o.id.slice(0, 8),
+        member: o.member?.company_name ?? o.member?.member_name ?? '—',
+        car: [o.maker, o.car_model].filter(Boolean).join(' '),
+        status: ORDER_STATUS_LABEL[o.status],
+        tone: ORDER_STATUS_TONE[o.status],
+      }))
+    : ORDERS
   const planSlices = stats.planDistribution
     .filter((p) => p.count > 0)
     .map((p, i) => ({ label: p.name, value: p.count, color: DONUT_COLORS[i % DONUT_COLORS.length] }))
@@ -313,7 +325,7 @@ export default async function AdminDashboardPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {ORDERS.map((o) => (
+                {orderRows.map((o) => (
                   <tr key={o.id} className="hover:bg-slate-50">
                     <td className="px-4 py-2.5 font-medium text-slate-700">{o.id}</td>
                     <td className="px-2 py-2.5 text-slate-600">{o.member}</td>

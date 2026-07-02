@@ -1,6 +1,6 @@
-import { Bell, Search } from 'lucide-react'
-import Link from 'next/link'
+import { Search } from 'lucide-react'
 import SignOutButton from '@/components/SignOutButton'
+import RealtimeBell from '@/components/shell/RealtimeBell'
 
 /** コンテンツ上部のトップバー (検索 + 通知 + ユーザー)。 */
 export default function Topbar({
@@ -9,6 +9,8 @@ export default function Topbar({
   notificationsHref,
   unread = 0,
   showSearch = false,
+  notifyScope = 'admin',
+  userId,
 }: {
   userName: string
   roleLabel: string
@@ -16,6 +18,10 @@ export default function Topbar({
   unread?: number
   /** 検索バーを表示する (ダッシュボード等) */
   showSearch?: boolean
+  /** 通知の購読範囲: 本部='admin' / 加盟店='user' */
+  notifyScope?: 'admin' | 'user'
+  /** リアルタイム購読用の現在ユーザーID */
+  userId?: string
 }) {
   return (
     <header className="sticky top-0 z-10 flex h-16 items-center gap-3 border-b border-slate-200 bg-white/90 px-4 backdrop-blur sm:px-6">
@@ -30,19 +36,8 @@ export default function Topbar({
       )}
 
       <div className={showSearch ? 'flex items-center gap-3' : 'ml-auto flex items-center gap-3'}>
-        {notificationsHref && (
-          <Link
-            href={notificationsHref}
-            className="relative rounded-lg p-2 text-slate-500 hover:bg-slate-100"
-            aria-label="通知"
-          >
-            <Bell className="h-5 w-5" />
-            {unread > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand-500 px-1 text-[10px] font-semibold text-white">
-                {unread > 99 ? '99+' : unread}
-              </span>
-            )}
-          </Link>
+        {notificationsHref && userId && (
+          <RealtimeBell href={notificationsHref} initialUnread={unread} scope={notifyScope} userId={userId} />
         )}
         <div className="flex items-center gap-2.5 border-l border-slate-200 pl-3">
           <div className="text-right leading-tight">

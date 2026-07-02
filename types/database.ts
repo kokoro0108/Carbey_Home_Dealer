@@ -174,6 +174,65 @@ export type NotificationRow = {
   created_at: string
 }
 
+export type ChatConversationRow = {
+  id: string
+  member_id: string
+  last_message_at: string | null
+  created_at: string
+}
+
+export type ChatMessageRow = {
+  id: string
+  conversation_id: string
+  sender_id: string | null
+  sender_role: UserRole
+  sender_name: string | null
+  body: string | null
+  attachment_path: string | null
+  attachment_name: string | null
+  attachment_type: string | null
+  attachment_size: number | null
+  read_at: string | null
+  edited_at: string | null
+  deleted_at: string | null
+  created_at: string
+}
+
+export type OrderStatus = 'received' | 'in_progress' | 'completed' | 'cancelled'
+
+export type OrderRow = {
+  id: string
+  order_number: string | null
+  member_id: string
+  maker: string | null
+  car_model: string
+  year: string | null
+  budget_yen: number | null
+  preferred_color: string | null
+  mileage_max: number | null
+  notes: string | null
+  status: OrderStatus
+  admin_notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type OnboardingTaskStatus = 'todo' | 'in_progress' | 'done'
+
+export type OnboardingTaskRow = {
+  id: string
+  member_id: string
+  step_key: string
+  step_label: string
+  title: string
+  status: OnboardingTaskStatus
+  sort_order: number
+  due_date: string | null
+  completed_at: string | null
+  created_at: string
+  updated_at: string
+}
+
 export type Database = {
   portal: {
     Tables: {
@@ -186,6 +245,10 @@ export type Database = {
       crm_deals: { Row: CrmDealRow; Insert: CrmDealInsert; Update: Partial<CrmDealInsert> }
       crm_deal_notes: { Row: CrmDealNoteRow; Insert: Partial<CrmDealNoteRow>; Update: Partial<CrmDealNoteRow> }
       notifications: { Row: NotificationRow; Insert: Partial<NotificationRow>; Update: Partial<NotificationRow> }
+      onboarding_tasks: { Row: OnboardingTaskRow; Insert: Partial<OnboardingTaskRow>; Update: Partial<OnboardingTaskRow> }
+      orders: { Row: OrderRow; Insert: Partial<OrderRow>; Update: Partial<OrderRow> }
+      chat_conversations: { Row: ChatConversationRow; Insert: Partial<ChatConversationRow>; Update: Partial<ChatConversationRow> }
+      chat_messages: { Row: ChatMessageRow; Insert: Partial<ChatMessageRow>; Update: Partial<ChatMessageRow> }
     }
     Views: Record<string, never>
     Functions: Record<string, never>

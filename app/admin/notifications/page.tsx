@@ -1,7 +1,7 @@
-import { CheckCheck, Bell } from 'lucide-react'
+import { Bell } from 'lucide-react'
 import { requireStaff } from '@/lib/auth/session'
 import { listAdminNotifications } from '@/lib/portal/notifications'
-import { markAllReadAction } from './actions'
+import MarkAllReadButton from './MarkAllReadButton'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,14 +22,7 @@ export default async function NotificationsPage() {
     <div className="mx-auto max-w-2xl">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-xl font-bold text-slate-900">通知</h1>
-        {hasUnread && (
-          <form action={markAllReadAction}>
-            <button className="flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50">
-              <CheckCheck className="h-4 w-4" />
-              すべて既読
-            </button>
-          </form>
-        )}
+        {hasUnread && <MarkAllReadButton />}
       </div>
 
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">

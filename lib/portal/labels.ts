@@ -1,4 +1,4 @@
-import type { MemberStatus, UserRole, PaymentStatus, DealStatus } from '@/types/database'
+import type { MemberStatus, UserRole, PaymentStatus, DealStatus, OrderStatus } from '@/types/database'
 
 export const MEMBER_STATUS_LABEL: Record<MemberStatus, string> = {
   pending: '申込中',
@@ -32,6 +32,21 @@ export const PAYMENT_STATUS_STYLE: Record<PaymentStatus, string> = {
   unpaid: 'bg-gray-100 text-gray-600',
   paid: 'bg-green-50 text-green-700',
   overdue: 'bg-red-50 text-red-700',
+}
+
+// オーダー (仕入れ依頼) ステータス
+export const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
+  received: '受付中',
+  in_progress: '対応中',
+  completed: '完了',
+  cancelled: 'キャンセル',
+}
+
+export const ORDER_STATUS_TONE: Record<OrderStatus, 'amber' | 'blue' | 'green' | 'slate'> = {
+  received: 'amber',
+  in_progress: 'blue',
+  completed: 'green',
+  cancelled: 'slate',
 }
 
 // CRM 商談ステータス (要求書 5.12)
