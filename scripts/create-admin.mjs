@@ -58,14 +58,23 @@ if (createRes.ok) {
   }
 }
 
-// 2. public.portal_bootstrap_admin RPC (public ラッパー。portal 未公開でも呼べる)
-const rpcRes = await fetch(`${url}/rest/v1/rpc/portal_bootstrap_admin`, {
-  method: 'POST',
-  headers,
-  body: JSON.stringify({ p_user_id: userId, p_name: name, p_email: email }),
-})
+// 2. 管理者に昇格。Exposed schemas の状態に依存しないよう 2 段構えで試す:
+//    (a) portal.bootstrap_admin を直接 (portal が公開されている場合)
+//    (b) public.portal_bootstrap_admin ラッパー (public が公開されている場合)
+async function callRpc(fnName, profile) {
+  return fetch(`${url}/rest/v1/rpc/${fnName}`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Profile': profile, 'Accept-Profile': profile },
+    body: JSON.stringify({ p_user_id: userId, p_name: name, p_email: email }),
+  })
+}
+
+let rpcRes = await callRpc('bootstrap_admin', 'portal')
 if (!rpcRes.ok) {
-  throw new Error(`portal_bootstrap_admin failed: ${rpcRes.status} ${await rpcRes.text()}`)
+  rpcRes = await callRpc('portal_bootstrap_admin', 'public')
+}
+if (!rpcRes.ok) {
+  throw new Error(`bootstrap_admin failed: ${rpcRes.status} ${await rpcRes.text()}`)
 }
 
 console.log(`✅ ${email} を管理者(admin)として登録しました (user_id=${userId})`)
