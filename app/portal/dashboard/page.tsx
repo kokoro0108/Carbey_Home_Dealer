@@ -3,12 +3,14 @@ import Link from 'next/link'
 import {
   CheckCircle2, Loader2, Car, ClipboardPlus, Search, FileBarChart,
   MessageSquare, ChevronRight, Bot, Hand, ArrowRight, Clock, Sparkles,
+  Package, Wrench, Truck,
 } from 'lucide-react'
 import { requireMember } from '@/lib/auth/session'
 import { getMemberByUserId } from '@/lib/portal/members'
 import { getOwnOnboarding, getNextAction } from '@/lib/portal/onboarding'
 import { getOwnFlow } from '@/lib/portal/flow'
 import { listOwnOrders } from '@/lib/portal/orders'
+import { getDealBoardSummary, listOwnActiveDeals, DEAL_STAGE_LABEL } from '@/lib/portal/deals'
 import { listAnnouncements } from '@/lib/portal/announcements'
 import { DarkCard, DarkCardHeader, DarkCardBody, DarkStat } from '@/components/portal-dark/DarkUI'
 import { DarkProgressRing } from '@/components/portal-dark/DarkCharts'
@@ -18,12 +20,14 @@ export const dynamic = 'force-dynamic'
 
 export default async function MemberDashboardPage() {
   const session = await requireMember()
-  const [member, onboarding, orders, announcements, flowInfo] = await Promise.all([
+  const [member, onboarding, orders, announcements, flowInfo, dealSummary, activeDeals] = await Promise.all([
     getMemberByUserId(session.userId),
     getOwnOnboarding(session.userId),
     listOwnOrders(session.userId),
     listAnnouncements(true, 5),
     getOwnFlow(session.userId),
+    getDealBoardSummary(session.userId),
+    listOwnActiveDeals(session.userId),
   ])
 
   const name = member?.member_name ?? session.name ?? 'ゲスト'
@@ -65,6 +69,48 @@ export default async function MemberDashboardPage() {
           </p>
         </div>
       </div>
+
+      {/* ===== 半自動売買 進捗ボード（横軸・最上部に可視化） ===== */}
+      {flow === 'semi' && (dealSummary.active > 0 || dealSummary.delivered > 0) && (
+        <div className="rounded-2xl border border-carbon-700 bg-carbon-900/60 p-5">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-white">
+              <Package className="h-4 w-4 text-brand-400" /> 取引の進捗
+            </h2>
+            <Link href="/portal/orders" className="flex items-center gap-1 text-xs text-brand-400 hover:underline">
+              オーダー管理 <ChevronRight className="h-3 w-3" />
+            </Link>
+          </div>
+          {/* ステージ別 横軸 */}
+          <div className="grid grid-cols-3 gap-3">
+            <StageTile icon={<Package className="h-5 w-5" />} label={DEAL_STAGE_LABEL.sourcing} count={dealSummary.sourcing} tone="sky" />
+            <StageTile icon={<Wrench className="h-5 w-5" />} label={DEAL_STAGE_LABEL.prepping} count={dealSummary.prepping} tone="amber" />
+            <StageTile icon={<CheckCircle2 className="h-5 w-5" />} label={DEAL_STAGE_LABEL.delivered} count={dealSummary.delivered} tone="brand" />
+          </div>
+          {/* 進行中案件の一覧（現在ステージを横軸で表示） */}
+          {activeDeals.length > 0 && (
+            <ul className="mt-4 space-y-2">
+              {activeDeals.slice(0, 4).map((d) => {
+                const stageIdx = d.status === 'prepping' ? 1 : d.status === 'delivered' ? 2 : 0
+                return (
+                  <li key={d.id}>
+                    <Link href={`/portal/orders/deal/${d.id}`} className="flex items-center gap-3 rounded-lg border border-carbon-700 bg-carbon-800/40 px-3 py-2 hover:bg-carbon-800">
+                      <span className="min-w-0 flex-1 truncate text-sm text-slate-200">{[d.maker, d.car_model, d.year].filter(Boolean).join(' ') || '車両案件'}</span>
+                      {/* ミニ横軸 */}
+                      <span className="flex items-center gap-1">
+                        {[Package, Wrench, Truck].map((Ic, i) => (
+                          <Ic key={i} className={`h-3.5 w-3.5 ${i <= stageIdx ? 'text-brand-400' : 'text-carbon-600'}`} />
+                        ))}
+                      </span>
+                      <span className="w-16 text-right text-[11px] font-medium text-brand-400">{DEAL_STAGE_LABEL[d.status]}</span>
+                    </Link>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
+      )}
 
       {/* ===== 次のアクション（㉜ 素人にも分かる導線） ===== */}
       {nextAction && !nextAction.done && (
@@ -201,6 +247,21 @@ export default async function MemberDashboardPage() {
           </div>
         </DarkCardBody>
       </DarkCard>
+    </div>
+  )
+}
+
+function StageTile({ icon, label, count, tone }: { icon: React.ReactNode; label: string; count: number; tone: 'sky' | 'amber' | 'brand' }) {
+  const tones = {
+    sky: 'text-sky-400',
+    amber: 'text-amber-400',
+    brand: 'text-brand-400',
+  }
+  return (
+    <div className="rounded-xl border border-carbon-700 bg-carbon-800/40 p-3 text-center">
+      <span className={`inline-flex ${tones[tone]}`}>{icon}</span>
+      <div className="mt-1 text-2xl font-bold text-white">{count}</div>
+      <div className="text-[11px] text-slate-400">{label}</div>
     </div>
   )
 }

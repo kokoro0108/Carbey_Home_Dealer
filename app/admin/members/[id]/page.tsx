@@ -8,13 +8,22 @@ import { listEvidences } from '@/lib/portal/evidence'
 import { getFunding, LOAN_STEPS } from '@/lib/portal/funding'
 import { getMemberOrderSummary } from '@/lib/portal/orders'
 import { getMemberCapabilities } from '@/lib/portal/capabilities'
+import { getLedgerBalance, listLedgerEntries } from '@/lib/portal/ledger'
 import { listConsentLog } from '@/lib/portal/agreements'
 import { MEMBER_STATUS_LABEL, yen } from '@/lib/portal/labels'
 import { Badge } from '@/components/ui/Badge'
 import { updateMemberAction, issueCredentialsAction } from '../actions'
 import { reviewEvidenceAction } from '../evidence-actions'
 import { confirmSelfAction, setAdminStepAction } from '../funding-actions'
+import { addLedgerEntryAction, deleteLedgerEntryAction } from '../ledger-actions'
 import MemberFormFields from '../MemberFormFields'
+
+const LEDGER_KIND_LABEL: Record<string, string> = {
+  deposit: '入金（デポジット）',
+  withdraw: '出金',
+  settlement: '取引精算',
+  adjust: '調整',
+}
 
 export const dynamic = 'force-dynamic'
 
@@ -32,8 +41,9 @@ export default async function MemberDetailPage({
     getMember(id), listPlans(false), listPayments(id), listEvidences(id),
   ])
   if (!member) notFound()
-  const [funding, consents, orderSummary, capabilities] = await Promise.all([
+  const [funding, consents, orderSummary, capabilities, ledgerBalance, ledgerEntries] = await Promise.all([
     getFunding(member.id), listConsentLog(member.id), getMemberOrderSummary(member.id), getMemberCapabilities(member.id),
+    getLedgerBalance(member.id), listLedgerEntries(member.id),
   ])
 
   const onboardingPct = member.onboarding_total
@@ -418,9 +428,75 @@ export default async function MemberDetailPage({
         </div>
       </form>
 
+      {/* ===== 資金管理（仕入れ資金・預かり金台帳／半自動売買フェーズ1） ===== */}
+      <div className="mb-6 rounded-xl border border-slate-200 bg-white p-5">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+            <Wallet className="h-4 w-4 text-brand-500" /> 仕入れ資金（預かり金）
+          </h2>
+          <div className="text-right">
+            <div className="text-[11px] text-slate-500">預かり残高</div>
+            <div className={`text-lg font-bold ${ledgerBalance > 0 ? 'text-emerald-700' : 'text-slate-900'}`}>{yen(ledgerBalance)}</div>
+          </div>
+        </div>
+
+        {/* 加盟金 支払状況（既存 payment_status を表示） */}
+        <div className="mb-3 flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs">
+          <span className="text-slate-500">加盟金 支払状況：</span>
+          <Badge tone={member.payment_status === 'paid' ? 'green' : member.payment_status === 'overdue' ? 'red' : 'amber'}>
+            {member.payment_status === 'paid' ? '支払済み' : member.payment_status === 'overdue' ? '延滞' : '未払い'}
+          </Badge>
+          <span className="text-slate-400">加盟金：{yen(member.joining_fee_yen)}</span>
+        </div>
+
+        {/* 入出金の登録 */}
+        <form action={addLedgerEntryAction} className="flex flex-wrap items-end gap-2 border-t border-slate-100 pt-3">
+          <input type="hidden" name="member_id" value={member.id} />
+          <div>
+            <label className="mb-1 block text-[11px] text-slate-500">種別</label>
+            <select name="kind" className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm">
+              <option value="deposit">入金（デポジット）</option>
+              <option value="withdraw">出金</option>
+              <option value="adjust">調整（＋）</option>
+              <option value="settlement">取引精算（－）</option>
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] text-slate-500">金額（円）</label>
+            <input name="amount" inputMode="numeric" placeholder="1000000" className="w-36 rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm" />
+          </div>
+          <div className="min-w-[160px] flex-1">
+            <label className="mb-1 block text-[11px] text-slate-500">メモ（任意）</label>
+            <input name="note" placeholder="仕入れ資金デポジット 等" className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm" />
+          </div>
+          <button className="rounded-lg bg-brand-500 px-4 py-1.5 text-sm font-semibold text-white hover:bg-brand-600">登録</button>
+        </form>
+
+        {/* 入出金履歴 */}
+        {ledgerEntries.length > 0 && (
+          <ul className="mt-3 divide-y divide-slate-100 border-t border-slate-100">
+            {ledgerEntries.map((e) => (
+              <li key={e.id} className="flex items-center gap-3 py-2 text-sm">
+                <span className="w-28 text-xs text-slate-500">{new Date(e.created_at).toLocaleDateString('ja-JP')}</span>
+                <span className="w-32 text-xs text-slate-600">{LEDGER_KIND_LABEL[e.kind] ?? e.kind}</span>
+                <span className={`w-28 font-medium ${e.amount_yen >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
+                  {e.amount_yen >= 0 ? '+' : ''}{yen(e.amount_yen)}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-xs text-slate-500">{e.note ?? ''}</span>
+                <form action={deleteLedgerEntryAction}>
+                  <input type="hidden" name="id" value={e.id} />
+                  <input type="hidden" name="member_id" value={member.id} />
+                  <button className="rounded-md p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" title="取消"><XCircle className="h-4 w-4" /></button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
       {/* 入金履歴 */}
       <section className="mt-8">
-        <h2 className="mb-3 text-sm font-semibold text-slate-900">入金履歴</h2>
+        <h2 className="mb-3 text-sm font-semibold text-slate-900">入金履歴（加盟金・月額）</h2>
         <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
           <table className="w-full text-sm">
             <thead className="border-b border-slate-200 bg-slate-50 text-left text-slate-500">

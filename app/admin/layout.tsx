@@ -19,6 +19,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     primary.push({ href: '/admin/members', label: '加盟店管理', icon: 'store' })
     primary.push({ href: '/admin/contracts', label: '契約管理', icon: 'contract', soon: true })
     primary.push({ href: '/admin/billing', label: '請求・入金管理', icon: 'billing', soon: true })
+    primary.push({ href: '/admin/funds', label: '資金管理', icon: 'billing' })
     primary.push({ href: '/admin/onboarding', label: 'オンボーディング管理', icon: 'onboarding' })
   }
   primary.push({ href: '/admin/vehicles', label: '車両進捗管理', icon: 'vehicle', soon: true })
@@ -41,6 +42,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   if (canAccess(session.role, 'settings')) settingsItems.push({ href: '/admin/permissions', label: '権限管理', icon: 'settings' })
   settingsItems.push({ href: '/admin/terms', label: '利用規約設定', icon: 'contract' })
   settingsItems.push({ href: '/admin/manual', label: '実践マニュアル', icon: 'report' })
+  if (canAccess(session.role, 'members')) settingsItems.push({ href: '/admin/shipping', label: '陸送費設定', icon: 'vehicle' })
 
   // 本日のアラート（実データ。0件の項目は表示しない）
   const alerts = [

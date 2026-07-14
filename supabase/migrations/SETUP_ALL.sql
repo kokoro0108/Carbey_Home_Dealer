@@ -2340,6 +2340,380 @@ create policy manual_media_write on storage.objects
 
 
 -- #####################################################################
+-- ## 022_member_ledger.sql
+-- #####################################################################
+-- =====================================================================
+-- Carbey Portal — 半自動売買フェーズ1: 預かり金台帳（仕入れ資金）
+-- =====================================================================
+-- クライアント要件（2026-07-13 / docs/semi-auto-trading-design.md）:
+--   CRM内で加盟金・仕入れ資金（預かり金）を個別管理＋全体管理。
+--   預かり金残高は、後続の「超過オーダー制限」「自動精算」の土台になる。
+--
+--   member_ledger  : 加盟店ごとの預かり金残高（1行）
+--   ledger_entries : 入出金・精算の明細（deposit/withdraw/settlement/adjust）
+--   残高は entries から自動再計算（トリガ）。整合性を保証。
+--
+-- 加盟金/月額は既存 payments を活用。ここは「仕入れ資金（預かり金）」に特化。
+-- 冪等化のため if exists / on conflict を併用。
+-- =====================================================================
+
+-- ---------------------------------------------------------------------
+-- 1) member_ledger：加盟店ごとの預かり金残高
+-- ---------------------------------------------------------------------
+create table if not exists portal.member_ledger (
+  id           uuid primary key default gen_random_uuid(),
+  member_id    uuid not null unique references portal.members(id) on delete cascade,
+  balance_yen  bigint not null default 0,   -- 預かり金残高（entries から自動再計算）
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+
+create index if not exists idx_member_ledger_member on portal.member_ledger(member_id);
+
+drop trigger if exists trg_member_ledger_touch on portal.member_ledger;
+create trigger trg_member_ledger_touch
+  before update on portal.member_ledger
+  for each row execute function portal.touch_updated_at();
+
+-- ---------------------------------------------------------------------
+-- 2) ledger_entries：入出金・精算の明細
+--    kind: deposit(入金/デポジット) / withdraw(出金) /
+--          settlement(取引精算での相殺) / adjust(調整)
+--    amount_yen は符号付き（+=入金/戻し, -=出金/精算引き）。
+-- ---------------------------------------------------------------------
+create table if not exists portal.ledger_entries (
+  id           uuid primary key default gen_random_uuid(),
+  member_id    uuid not null references portal.members(id) on delete cascade,
+  kind         text not null check (kind in ('deposit', 'withdraw', 'settlement', 'adjust')),
+  amount_yen   bigint not null,                 -- 符号付き（+入金 / -出金）
+  note         text,
+  -- 後続フェーズで案件精算に紐付ける（今は null 可）
+  deal_id      uuid,
+  created_by   uuid references auth.users(id) on delete set null,
+  created_at   timestamptz not null default now()
+);
+
+create index if not exists idx_ledger_entries_member on portal.ledger_entries(member_id, created_at desc);
+
+-- ---------------------------------------------------------------------
+-- 3) 残高の自動再計算：entries の変更で member_ledger.balance_yen を更新
+-- ---------------------------------------------------------------------
+create or replace function portal.recompute_ledger_balance(p_member_id uuid)
+returns void language plpgsql security definer set search_path = portal as $$
+declare
+  v_sum bigint;
+begin
+  select coalesce(sum(amount_yen), 0) into v_sum
+    from portal.ledger_entries where member_id = p_member_id;
+  insert into portal.member_ledger (member_id, balance_yen)
+    values (p_member_id, v_sum)
+    on conflict (member_id) do update set balance_yen = excluded.balance_yen, updated_at = now();
+end;
+$$;
+
+create or replace function portal.trg_ledger_recompute()
+returns trigger language plpgsql security definer set search_path = portal as $$
+begin
+  perform portal.recompute_ledger_balance(coalesce(new.member_id, old.member_id));
+  return coalesce(new, old);
+end;
+$$;
+
+drop trigger if exists trg_ledger_entries_recompute on portal.ledger_entries;
+create trigger trg_ledger_entries_recompute
+  after insert or update or delete on portal.ledger_entries
+  for each row execute function portal.trg_ledger_recompute();
+
+-- ---------------------------------------------------------------------
+-- RLS
+-- ---------------------------------------------------------------------
+alter table portal.member_ledger enable row level security;
+alter table portal.ledger_entries enable row level security;
+
+-- 台帳・明細：本部は全件、加盟店は自分の分を閲覧
+drop policy if exists portal_member_ledger_read on portal.member_ledger;
+create policy portal_member_ledger_read on portal.member_ledger
+  for select using (portal.is_staff(auth.uid()) or member_id = portal.current_member_id(auth.uid()));
+
+drop policy if exists portal_ledger_entries_read on portal.ledger_entries;
+create policy portal_ledger_entries_read on portal.ledger_entries
+  for select using (portal.is_staff(auth.uid()) or member_id = portal.current_member_id(auth.uid()));
+
+-- 入出金の登録・調整は本部（can_crm）のみ。加盟店は閲覧のみ。
+drop policy if exists portal_ledger_entries_write on portal.ledger_entries;
+create policy portal_ledger_entries_write on portal.ledger_entries
+  for all using (portal.can_crm(auth.uid())) with check (portal.can_crm(auth.uid()));
+
+-- GRANT
+grant select on portal.member_ledger to authenticated;
+grant select, insert, update, delete on portal.ledger_entries to authenticated;
+grant all on portal.member_ledger, portal.ledger_entries to service_role;
+
+
+-- #####################################################################
+-- ## 023_vehicle_deals.sql
+-- #####################################################################
+-- =====================================================================
+-- Carbey Portal — 半自動売買フェーズ3: 車両案件ライフサイクル
+-- =====================================================================
+-- クライアント確定（2026-07-14 / docs/semi-auto-trading-design.md §8）:
+--   進捗4段（一件ごとに手動運用せず自動遷移）:
+--     ordered(車両オーダー) → sourcing(仕入れ中) → prepping(商品化中・任意) → delivered(納品完了)
+--   - オーダー送信で deal を生成し sourcing（仕入れ中）に自動遷移。
+--   - 商品化中(prepping)は加盟者/本部どちらでも手動で移行（クロスセル）。
+--   - 受領（受け取り完了スイッチ）で delivered → 取引終了・履歴反映・進捗リセット。
+--   「仕入れ中」は全仕入進捗を一本化。
+--
+-- 費用内訳（動的費目）・自動精算はフェーズ4/6で肉付け。ここは案件と遷移の骨格。
+-- 冪等化のため if exists を併用。
+-- =====================================================================
+
+create table if not exists portal.vehicle_deals (
+  id           uuid primary key default gen_random_uuid(),
+  member_id    uuid not null references portal.members(id) on delete cascade,
+  order_id     uuid references portal.orders(id) on delete set null,  -- 元オーダー
+  status       text not null default 'sourcing'
+                 check (status in ('ordered', 'sourcing', 'prepping', 'delivered')),
+  -- 車両情報（オーダーからコピー・表示用）
+  maker        text,
+  car_model    text,
+  year         text,
+  order_amount_yen bigint,          -- 発注金額（オーダー予算）
+  -- 進捗の各日付
+  ordered_at   timestamptz not null default now(),
+  sourcing_at  timestamptz,
+  prepping_at  timestamptz,
+  delivered_at timestamptz,
+  note         text,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+
+create index if not exists idx_vehicle_deals_member on portal.vehicle_deals(member_id, status);
+create index if not exists idx_vehicle_deals_order on portal.vehicle_deals(order_id);
+
+drop trigger if exists trg_vehicle_deals_touch on portal.vehicle_deals;
+create trigger trg_vehicle_deals_touch
+  before update on portal.vehicle_deals
+  for each row execute function portal.touch_updated_at();
+
+-- ---------------------------------------------------------------------
+-- RLS：本部は全件、加盟店は自分の案件
+-- ---------------------------------------------------------------------
+alter table portal.vehicle_deals enable row level security;
+
+drop policy if exists portal_vehicle_deals_read on portal.vehicle_deals;
+create policy portal_vehicle_deals_read on portal.vehicle_deals
+  for select using (portal.is_staff(auth.uid()) or member_id = portal.current_member_id(auth.uid()));
+
+-- 加盟店：自分の案件を更新（商品化移行・受領）
+drop policy if exists portal_vehicle_deals_member_update on portal.vehicle_deals;
+create policy portal_vehicle_deals_member_update on portal.vehicle_deals
+  for update using (member_id = portal.current_member_id(auth.uid())) with check (member_id = portal.current_member_id(auth.uid()));
+
+-- 本部：全件の作成・更新
+drop policy if exists portal_vehicle_deals_staff_all on portal.vehicle_deals;
+create policy portal_vehicle_deals_staff_all on portal.vehicle_deals
+  for all using (portal.can_crm(auth.uid())) with check (portal.can_crm(auth.uid()));
+
+grant select, insert, update on portal.vehicle_deals to authenticated;
+grant all on portal.vehicle_deals to service_role;
+
+
+-- #####################################################################
+-- ## 024_deal_costs.sql
+-- #####################################################################
+-- =====================================================================
+-- Carbey Portal — 半自動売買フェーズ4: 案件の費用内訳（動的費目）＋エビデンス
+-- =====================================================================
+-- クライアント確定（2026-07-14 / docs/semi-auto-trading-design.md §8）:
+--   Q7: 精算は固定4費目でなく「動的費目リスト」。陸送費の右に任意費目を追加でき、
+--       すべての費目名称を変更できる（label 自由・並べ替え可）。
+--   Q2: 仕入費は手入力＋「エビデンス取込」の2手段。計算書・整備明細を格納。
+--
+--   deal_costs: 案件ごとの費目。kind(分類)＋label(名称・変更可)＋amount＋エビデンス。
+--     kind: sourcing(仕入) / prepping(商品化) / shipping(陸送) / other(その他・追加費目)
+--   残金 = 預かり金 − Σ(deal_costs.amount_yen)。精算はフェーズ6。
+--
+-- エビデンスは private バケット deal-evidences（金銭情報のため機微）＋プロキシDL。
+-- 冪等化のため if exists / on conflict を併用。
+-- =====================================================================
+
+create table if not exists portal.deal_costs (
+  id           uuid primary key default gen_random_uuid(),
+  deal_id      uuid not null references portal.vehicle_deals(id) on delete cascade,
+  member_id    uuid not null references portal.members(id) on delete cascade,  -- RLS用
+  kind         text not null default 'other'
+                 check (kind in ('sourcing', 'prepping', 'shipping', 'other')),
+  label        text not null,                 -- 費目名（変更可）例：仕入価格 / 整備費 / 陸送費
+  amount_yen   bigint not null default 0,     -- 金額（正=費用）
+  sort_order   int not null default 0,
+  note         text,
+  -- エビデンス（計算書・整備明細）private バケット
+  attachment_path text,
+  attachment_name text,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+
+create index if not exists idx_deal_costs_deal on portal.deal_costs(deal_id, sort_order);
+create index if not exists idx_deal_costs_member on portal.deal_costs(member_id);
+
+drop trigger if exists trg_deal_costs_touch on portal.deal_costs;
+create trigger trg_deal_costs_touch
+  before update on portal.deal_costs
+  for each row execute function portal.touch_updated_at();
+
+-- ---------------------------------------------------------------------
+-- Storage: private バケット deal-evidences（計算書・整備明細）
+-- ---------------------------------------------------------------------
+insert into storage.buckets (id, name, public)
+values ('deal-evidences', 'deal-evidences', false)
+on conflict (id) do nothing;
+
+drop policy if exists deal_evidences_rw on storage.objects;
+create policy deal_evidences_rw on storage.objects
+  for all to authenticated
+  using (bucket_id = 'deal-evidences' and auth.uid() is not null)
+  with check (bucket_id = 'deal-evidences' and auth.uid() is not null);
+
+-- ---------------------------------------------------------------------
+-- RLS：本部は全件、加盟店は自分の案件費目を閲覧・編集
+-- ---------------------------------------------------------------------
+alter table portal.deal_costs enable row level security;
+
+drop policy if exists portal_deal_costs_read on portal.deal_costs;
+create policy portal_deal_costs_read on portal.deal_costs
+  for select using (portal.is_staff(auth.uid()) or member_id = portal.current_member_id(auth.uid()));
+
+drop policy if exists portal_deal_costs_member_write on portal.deal_costs;
+create policy portal_deal_costs_member_write on portal.deal_costs
+  for all using (member_id = portal.current_member_id(auth.uid())) with check (member_id = portal.current_member_id(auth.uid()));
+
+drop policy if exists portal_deal_costs_staff_write on portal.deal_costs;
+create policy portal_deal_costs_staff_write on portal.deal_costs
+  for all using (portal.can_crm(auth.uid())) with check (portal.can_crm(auth.uid()));
+
+grant select, insert, update, delete on portal.deal_costs to authenticated;
+grant all on portal.deal_costs to service_role;
+
+
+-- #####################################################################
+-- ## 025_shipping.sql
+-- #####################################################################
+-- =====================================================================
+-- Carbey Portal — 半自動売買フェーズ5: 陸送費マスタ＋特殊車個別見積
+-- =====================================================================
+-- クライアント確定（2026-07-14 / docs/semi-auto-trading-design.md §8）:
+--   Q3: 一律でなく「発地×着地を個別に設定できるマスタ」。都道府県ペアで料金設定。
+--       未設定ペアはデフォルト or 個別見積。
+--   Q4: 高級車・規格外車は「個別見積もり」に切替。初期メーカー7社＋随時追加。
+--   Q8: 外部連携は将来。当面は本部が都道府県ペア料金を手設定。
+--
+--   shipping_rates: (from_pref, to_pref) → amount_yen の料金マスタ
+--   special_vehicle_makers: 個別見積対象のメーカー
+--   陸送費は案件の陸送先（着地県）から自動計算。特殊車は個別見積フラグ。
+-- 冪等化のため if exists / on conflict を併用。
+-- =====================================================================
+
+-- ---------------------------------------------------------------------
+-- 1) shipping_rates：発地×着地の料金マスタ
+-- ---------------------------------------------------------------------
+create table if not exists portal.shipping_rates (
+  id          uuid primary key default gen_random_uuid(),
+  from_pref   text not null,               -- 発地（都道府県）
+  to_pref     text not null,               -- 着地（都道府県）
+  amount_yen  bigint not null default 0,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  unique (from_pref, to_pref)
+);
+
+create index if not exists idx_shipping_rates_pair on portal.shipping_rates(from_pref, to_pref);
+
+drop trigger if exists trg_shipping_rates_touch on portal.shipping_rates;
+create trigger trg_shipping_rates_touch
+  before update on portal.shipping_rates
+  for each row execute function portal.touch_updated_at();
+
+-- ---------------------------------------------------------------------
+-- 2) special_vehicle_makers：個別見積対象メーカー
+-- ---------------------------------------------------------------------
+create table if not exists portal.special_vehicle_makers (
+  id          uuid primary key default gen_random_uuid(),
+  maker       text not null unique,        -- メーカー名（maker 文字列一致で判定）
+  note        text,
+  created_at  timestamptz not null default now()
+);
+
+-- ---------------------------------------------------------------------
+-- RLS：閲覧はログインユーザー全員、編集は本部
+-- ---------------------------------------------------------------------
+alter table portal.shipping_rates enable row level security;
+alter table portal.special_vehicle_makers enable row level security;
+
+drop policy if exists portal_shipping_rates_read on portal.shipping_rates;
+create policy portal_shipping_rates_read on portal.shipping_rates
+  for select using (auth.uid() is not null);
+drop policy if exists portal_shipping_rates_write on portal.shipping_rates;
+create policy portal_shipping_rates_write on portal.shipping_rates
+  for all using (portal.can_crm(auth.uid())) with check (portal.can_crm(auth.uid()));
+
+drop policy if exists portal_special_makers_read on portal.special_vehicle_makers;
+create policy portal_special_makers_read on portal.special_vehicle_makers
+  for select using (auth.uid() is not null);
+drop policy if exists portal_special_makers_write on portal.special_vehicle_makers;
+create policy portal_special_makers_write on portal.special_vehicle_makers
+  for all using (portal.can_crm(auth.uid())) with check (portal.can_crm(auth.uid()));
+
+grant select, insert, update, delete on portal.shipping_rates to authenticated;
+grant select, insert, update, delete on portal.special_vehicle_makers to authenticated;
+grant all on portal.shipping_rates, portal.special_vehicle_makers to service_role;
+
+-- ---------------------------------------------------------------------
+-- 初期の特殊車メーカー（個別見積対象）— 空なら投入
+-- ---------------------------------------------------------------------
+do $$
+begin
+  if not exists (select 1 from portal.special_vehicle_makers) then
+    insert into portal.special_vehicle_makers (maker) values
+      ('フェラーリ'), ('ベントレー'), ('ポルシェ'), ('ランボルギーニ'),
+      ('ロールスロイス'), ('マクラーレン'), ('アストンマーティン');
+  end if;
+end $$;
+
+
+-- #####################################################################
+-- ## 026_deal_settlement.sql
+-- #####################################################################
+-- =====================================================================
+-- Carbey Portal — 半自動売買フェーズ6: 受領時の自動精算＋残金繰越
+-- =====================================================================
+-- クライアント確定（2026-07-14 / docs/semi-auto-trading-design.md §8）:
+--   Q5/Q6: 受領（受け取り完了）→ 自動精算 → 取引履歴 → 進捗リセット → 残金繰越 → 新規オーダー可能。
+--   Q7: 残金 = 預かり金 − Σ費目（仕入・商品化・陸送・その他）。
+--   陸送費は着地県から自動計算（フェーズ5）。特殊車/未設定は個別見積。
+--
+--   vehicle_deals に精算フィールドを追加:
+--     to_pref         : 陸送先（着地都道府県）— 陸送費の自動計算に使用
+--     settled         : 精算済みフラグ
+--     settled_amount  : 精算した費用合計
+--     remaining_yen   : 精算後の預かり残金（記録用）
+--   精算処理（費用の ledger 記帳・残高減算）はアプリ側 settleDeal で実行。
+-- 冪等化のため if not exists を使用。
+-- =====================================================================
+
+alter table portal.vehicle_deals add column if not exists to_pref text;              -- 陸送先（着地県）
+alter table portal.vehicle_deals add column if not exists settled boolean not null default false;
+alter table portal.vehicle_deals add column if not exists settled_amount_yen bigint; -- 精算した費用合計
+alter table portal.vehicle_deals add column if not exists remaining_yen bigint;      -- 精算後の預かり残金
+
+comment on column portal.vehicle_deals.to_pref is '陸送先（着地都道府県）。陸送費の自動計算に使用';
+comment on column portal.vehicle_deals.settled is '受領時に精算済みか';
+comment on column portal.vehicle_deals.remaining_yen is '精算後の預かり残金（繰越額の記録）';
+
+
+-- #####################################################################
 -- ## 仕上げ: PostgREST スキーマキャッシュを再読込
 -- #####################################################################
 notify pgrst, 'reload schema';

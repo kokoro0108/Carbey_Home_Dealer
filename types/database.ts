@@ -312,6 +312,89 @@ export type EvidenceRow = {
   created_at: string
 }
 
+// 半自動売買フェーズ1: 預かり金台帳（仕入れ資金）
+export type LedgerEntryKind = 'deposit' | 'withdraw' | 'settlement' | 'adjust'
+
+export type MemberLedgerRow = {
+  id: string
+  member_id: string
+  balance_yen: number
+  created_at: string
+  updated_at: string
+}
+
+export type LedgerEntryRow = {
+  id: string
+  member_id: string
+  kind: LedgerEntryKind
+  amount_yen: number // 符号付き（+入金 / -出金）
+  note: string | null
+  deal_id: string | null
+  created_by: string | null
+  created_at: string
+}
+
+// 半自動売買フェーズ3: 車両案件ライフサイクル
+export type DealStatusStage = 'ordered' | 'sourcing' | 'prepping' | 'delivered'
+
+export type VehicleDealRow = {
+  id: string
+  member_id: string
+  order_id: string | null
+  status: DealStatusStage
+  maker: string | null
+  car_model: string | null
+  year: string | null
+  order_amount_yen: number | null
+  ordered_at: string
+  sourcing_at: string | null
+  prepping_at: string | null
+  delivered_at: string | null
+  note: string | null
+  // フェーズ6 精算
+  to_pref: string | null
+  settled: boolean
+  settled_amount_yen: number | null
+  remaining_yen: number | null
+  created_at: string
+  updated_at: string
+}
+
+// 半自動売買フェーズ4: 案件の費用内訳（動的費目）
+export type DealCostKind = 'sourcing' | 'prepping' | 'shipping' | 'other'
+
+export type DealCostRow = {
+  id: string
+  deal_id: string
+  member_id: string
+  kind: DealCostKind
+  label: string
+  amount_yen: number
+  sort_order: number
+  note: string | null
+  attachment_path: string | null
+  attachment_name: string | null
+  created_at: string
+  updated_at: string
+}
+
+// 半自動売買フェーズ5: 陸送費マスタ＋特殊車
+export type ShippingRateRow = {
+  id: string
+  from_pref: string
+  to_pref: string
+  amount_yen: number
+  created_at: string
+  updated_at: string
+}
+
+export type SpecialVehicleMakerRow = {
+  id: string
+  maker: string
+  note: string | null
+  created_at: string
+}
+
 export type OrderStatus = 'received' | 'in_progress' | 'completed' | 'cancelled'
 
 export type OrderRow = {
@@ -373,6 +456,12 @@ export type Database = {
       manual_progress: { Row: ManualProgressRow; Insert: Partial<ManualProgressRow>; Update: Partial<ManualProgressRow> }
       support_items: { Row: SupportItemRow; Insert: Partial<SupportItemRow>; Update: Partial<SupportItemRow> }
       funding_applications: { Row: FundingRow; Insert: Partial<FundingRow>; Update: Partial<FundingRow> }
+      member_ledger: { Row: MemberLedgerRow; Insert: Partial<MemberLedgerRow>; Update: Partial<MemberLedgerRow> }
+      ledger_entries: { Row: LedgerEntryRow; Insert: Partial<LedgerEntryRow>; Update: Partial<LedgerEntryRow> }
+      vehicle_deals: { Row: VehicleDealRow; Insert: Partial<VehicleDealRow>; Update: Partial<VehicleDealRow> }
+      deal_costs: { Row: DealCostRow; Insert: Partial<DealCostRow>; Update: Partial<DealCostRow> }
+      shipping_rates: { Row: ShippingRateRow; Insert: Partial<ShippingRateRow>; Update: Partial<ShippingRateRow> }
+      special_vehicle_makers: { Row: SpecialVehicleMakerRow; Insert: Partial<SpecialVehicleMakerRow>; Update: Partial<SpecialVehicleMakerRow> }
       chat_conversations: { Row: ChatConversationRow; Insert: Partial<ChatConversationRow>; Update: Partial<ChatConversationRow> }
       chat_messages: { Row: ChatMessageRow; Insert: Partial<ChatMessageRow>; Update: Partial<ChatMessageRow> }
       announcements: { Row: AnnouncementRow; Insert: Partial<AnnouncementRow>; Update: Partial<AnnouncementRow> }

@@ -2,6 +2,8 @@ import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { assertTradingAllowed } from '@/lib/portal/trading'
 import { getOwnOnboarding } from '@/lib/portal/onboarding'
 import { getOwnFlow } from '@/lib/portal/flow'
+import { getLedgerBalance } from '@/lib/portal/ledger'
+import { createDealFromOrder } from '@/lib/portal/deals'
 import type { OrderRow, OrderStatus } from '@/types/database'
 
 /**
@@ -106,12 +108,26 @@ export async function createOwnOrder(
     .maybeSingle<{ id: string }>()
   if (!member) throw new Error('会員情報が紐付いていません')
 
+  // フェーズ2 超過オーダー制限：発注金額（予算）は預かり残高より低いこと。
+  //   仕入資金を超えるオーダーを禁止（自動精算の前提）。
+  const balance = await getLedgerBalance(member.id)
+  const orderAmount = input.budget_yen ?? 0
+  if (!orderAmount || orderAmount <= 0) {
+    throw new Error('予算（発注金額）を入力してください。')
+  }
+  if (orderAmount >= balance) {
+    throw new Error(`発注金額（${orderAmount.toLocaleString()}円）が仕入れ資金の預かり残高（${balance.toLocaleString()}円）を超えています。残高の範囲内でオーダーしてください。`)
+  }
+
   const { data, error } = await supabase
     .from('orders')
     .insert({ ...input, member_id: member.id } as never)
     .select('*')
     .single<OrderRow>()
   if (error) throw new Error(error.message)
+
+  // フェーズ3：オーダー送信で車両案件を生成し「仕入れ中」に自動遷移
+  await createDealFromOrder(data)
   return data
 }
 
