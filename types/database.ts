@@ -256,6 +256,17 @@ export type AgreementConsentRow = {
   user_id: string | null
 }
 
+/** 規約に付随する別添（各種料金表など）。 */
+export type AgreementAttachmentRow = {
+  id: string
+  agreement_id: string
+  title: string
+  body: string
+  sort_order: number
+  created_at: string
+  updated_at: string
+}
+
 export type ManualSectionRow = {
   id: string
   title: string
@@ -451,6 +462,7 @@ export type Database = {
       orders: { Row: OrderRow; Insert: Partial<OrderRow>; Update: Partial<OrderRow> }
       evidences: { Row: EvidenceRow; Insert: Partial<EvidenceRow>; Update: Partial<EvidenceRow> }
       agreements: { Row: AgreementRow; Insert: Partial<AgreementRow>; Update: Partial<AgreementRow> }
+      agreement_attachments: { Row: AgreementAttachmentRow; Insert: Partial<AgreementAttachmentRow>; Update: Partial<AgreementAttachmentRow> }
       agreement_consents: { Row: AgreementConsentRow; Insert: Partial<AgreementConsentRow>; Update: Partial<AgreementConsentRow> }
       manual_sections: { Row: ManualSectionRow; Insert: Partial<ManualSectionRow>; Update: Partial<ManualSectionRow> }
       manual_progress: { Row: ManualProgressRow; Insert: Partial<ManualProgressRow>; Update: Partial<ManualProgressRow> }

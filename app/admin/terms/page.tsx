@@ -1,20 +1,22 @@
-import { FileText, CheckCircle2, Trash2 } from 'lucide-react'
+import { FileText, CheckCircle2, Trash2, Plus, Receipt } from 'lucide-react'
 import { requireStaff } from '@/lib/auth/session'
-import { listAgreements } from '@/lib/portal/agreements'
-import { saveAgreementAction, deleteAgreementAction } from './actions'
+import { listAgreements, listAttachments } from '@/lib/portal/agreements'
+import { saveAgreementAction, deleteAgreementAction, saveAttachmentAction, deleteAttachmentAction } from './actions'
 
 export const dynamic = 'force-dynamic'
 
 export default async function AdminTermsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ saved?: string; error?: string; edit?: string }>
+  searchParams: Promise<{ saved?: string; error?: string; edit?: string; edit_attach?: string }>
 }) {
   await requireStaff()
   const items = await listAgreements()
   const sp = await searchParams
   const editing = sp.edit ? items.find((a) => a.id === sp.edit) : undefined
   const active = items.find((a) => a.published)
+  const attachments = active ? await listAttachments(active.id) : []
+  const editingAttach = sp.edit_attach ? attachments.find((a) => a.id === sp.edit_attach) : undefined
 
   const field =
     'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100'
@@ -84,6 +86,54 @@ export default async function AdminTermsPage({
         </div>
         {!active && <p className="mt-2 text-xs text-amber-600">⚠️ 公開中の規約がありません。加盟店が同意できるよう、いずれかを公開してください。</p>}
       </div>
+
+      {/* ===== 各種料金表（別添・規約と同居して同意対象） ===== */}
+      {active && (
+        <div className="rounded-xl border border-slate-200 bg-white p-5">
+          <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold text-slate-900">
+            <Receipt className="h-4 w-4 text-brand-500" /> 各種料金表（利用規約の別添）
+          </h2>
+          <p className="mb-3 text-xs text-slate-500">
+            「{active.title}」に付随する料金表です。加盟店の規約ページに同居表示され、規約と一緒に同意対象になります。項目は自由に追加できます。
+          </p>
+
+          {/* 追加/編集フォーム */}
+          <form action={saveAttachmentAction} className="mb-4 space-y-3 rounded-lg border border-slate-100 bg-slate-50 p-3">
+            <input type="hidden" name="agreement_id" value={active.id} />
+            {editingAttach && <input type="hidden" name="id" value={editingAttach.id} />}
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700">
+              {editingAttach ? <FileText className="h-3.5 w-3.5 text-brand-500" /> : <Plus className="h-3.5 w-3.5 text-brand-500" />}
+              {editingAttach ? '料金表を編集' : '料金表を追加'}
+            </div>
+            <input name="title" required defaultValue={editingAttach?.title ?? ''} placeholder="料金表のタイトル（例：各種料金表 / 陸送料金表）" className={field} />
+            <textarea name="body" rows={8} defaultValue={editingAttach?.body ?? ''} placeholder="料金表の内容をテキストで入力（改行はそのまま反映されます）" className={`${field} font-mono`} />
+            <div className="flex justify-end gap-2">
+              {editingAttach && <a href="/admin/terms" className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:bg-white">新規に切替</a>}
+              <button className="rounded-lg bg-brand-500 px-4 py-1.5 text-sm font-semibold text-white hover:bg-brand-600">保存</button>
+            </div>
+          </form>
+
+          {/* 料金表一覧 */}
+          <ul className="divide-y divide-slate-100">
+            {attachments.length === 0 && <li className="py-3 text-center text-xs text-slate-400">料金表はまだありません。</li>}
+            {attachments.map((att) => (
+              <li key={att.id} className="flex items-center gap-3 py-2.5">
+                <FileText className="h-4 w-4 shrink-0 text-slate-400" />
+                <span className="min-w-0 flex-1 truncate text-sm text-slate-800">{att.title}</span>
+                {!att.body && <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-600">内容未入力</span>}
+                <a href={`/admin/terms?edit_attach=${att.id}`} className="rounded-md px-2.5 py-1 text-xs font-medium text-info-600 hover:underline">編集</a>
+                <form action={deleteAttachmentAction}>
+                  <input type="hidden" name="id" value={att.id} />
+                  <button className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600" title="削除"><Trash2 className="h-4 w-4" /></button>
+                </form>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-[11px] text-slate-400">
+            ※ 料金表を変更した場合、既存加盟店にも再同意を求めるには、規約を編集・再公開して新バージョンを発行してください。
+          </p>
+        </div>
+      )}
     </div>
   )
 }

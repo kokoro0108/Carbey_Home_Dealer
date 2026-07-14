@@ -1,5 +1,38 @@
 import { createServiceRoleClient } from '@/lib/supabase/admin'
-import type { AgreementRow, AgreementConsentRow } from '@/types/database'
+import type { AgreementRow, AgreementConsentRow, AgreementAttachmentRow } from '@/types/database'
+
+/** 規約に紐づく別添（各種料金表）の一覧（並び順）。 */
+export async function listAttachments(agreementId: string): Promise<AgreementAttachmentRow[]> {
+  const supabase = createServiceRoleClient()
+  const { data, error } = await supabase
+    .from('agreement_attachments')
+    .select('*')
+    .eq('agreement_id', agreementId)
+    .order('sort_order', { ascending: true })
+  if (error) throw new Error(error.message)
+  return (data ?? []) as unknown as AgreementAttachmentRow[]
+}
+
+/** 別添（料金表）を保存（新規/更新）。 */
+export async function saveAttachment(input: { id?: string; agreementId: string; title: string; body: string }): Promise<void> {
+  const supabase = createServiceRoleClient()
+  if (input.id) {
+    const { error } = await supabase.from('agreement_attachments').update({ title: input.title, body: input.body } as never).eq('id', input.id)
+    if (error) throw new Error(error.message)
+  } else {
+    const { data: last } = await supabase.from('agreement_attachments').select('sort_order').eq('agreement_id', input.agreementId).order('sort_order', { ascending: false }).limit(1).maybeSingle<{ sort_order: number }>()
+    const sort = (last?.sort_order ?? 0) + 10
+    const { error } = await supabase.from('agreement_attachments').insert({ agreement_id: input.agreementId, title: input.title, body: input.body, sort_order: sort } as never)
+    if (error) throw new Error(error.message)
+  }
+}
+
+/** 別添（料金表）を削除。 */
+export async function deleteAttachment(id: string): Promise<void> {
+  const supabase = createServiceRoleClient()
+  const { error } = await supabase.from('agreement_attachments').delete().eq('id', id)
+  if (error) throw new Error(error.message)
+}
 
 /** 現在有効な（公開中・最新の）利用規約を取得。 */
 export async function getActiveAgreement(): Promise<AgreementRow | null> {
