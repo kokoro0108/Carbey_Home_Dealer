@@ -13,6 +13,8 @@ import { listOrders } from '@/lib/portal/orders'
 import { listConversations } from '@/lib/portal/chat'
 import { listAnnouncements } from '@/lib/portal/announcements'
 import { getOverdueOverview } from '@/lib/portal/billing'
+import { getSalesSummary, getMonthlySales } from '@/lib/portal/sales'
+import { LineChart } from '@/components/charts/MiniCharts'
 import { yen, ORDER_STATUS_LABEL, ORDER_STATUS_TONE } from '@/lib/portal/labels'
 import { StatCard } from '@/components/ui/StatCard'
 import { Card, CardHeader, CardBody } from '@/components/ui/Card'
@@ -24,14 +26,17 @@ export const dynamic = 'force-dynamic'
 const DONUT_COLORS = ['#fb2c1d', '#1d5cf0', '#06b6d4', '#f59e0b', '#94a3b8']
 
 export default async function AdminDashboardPage() {
-  const [stats, recentOrders, members, chats, announcements, overdue] = await Promise.all([
+  const [stats, recentOrders, members, chats, announcements, overdue, salesSummary, monthlySales] = await Promise.all([
     getAdminStats(),
     listOrders(),
     listMembers(),
     listConversations(),
     listAnnouncements(true, 5),
     getOverdueOverview(),
+    getSalesSummary(),
+    getMonthlySales({ months: 6 }),
   ])
+  const hasSales = salesSummary.count > 0
   const m = stats.members
   const totalContracts = stats.planDistribution.reduce((s, p) => s + p.count, 0)
 
@@ -91,6 +96,38 @@ export default async function AdminDashboardPage() {
         <StatCard label="新規オーダー" value={stats.newOrders} icon={<ShoppingCart className="h-4 w-4" />} tone="slate" href="/admin/orders?status=received" sub="受付中" />
         <StatCard label="未読チャット" value={stats.unreadChats} icon={<MessageSquare className="h-4 w-4" />} tone="blue" href="/admin/chat" sub="加盟店からの未読" />
       </div>
+
+      {/* ===== 販売実績（Phase 3・要件5.6：グラフ＋サマリ） ===== */}
+      <Card>
+        <CardHeader title="販売実績" action={<Link href="/admin/sales" className="text-xs text-info-600 hover:underline">販売実績管理へ</Link>} />
+        <CardBody>
+          {hasSales ? (
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+              <div className="lg:col-span-2">
+                <LineChart
+                  series={[
+                    { name: '売上', data: monthlySales.map((m) => m.revenueYen), color: '#1d5cf0' },
+                    { name: '粗利益', data: monthlySales.map((m) => m.profitYen), color: '#16a34a' },
+                  ]}
+                  labels={monthlySales.map((m) => m.label)}
+                  valueFormat={(v) => `${Math.round(v / 10000)}万`}
+                  unit="円"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-1">
+                <SalesTile label="販売台数" value={`${salesSummary.count}台`} />
+                <SalesTile label="売上合計" value={yen(salesSummary.revenueYen)} />
+                <SalesTile label="粗利益合計" value={yen(salesSummary.profitYen)} tone="text-emerald-700" />
+                <SalesTile label="利益率" value={`${salesSummary.marginPct}%`} tone="text-emerald-700" />
+              </div>
+            </div>
+          ) : (
+            <p className="py-8 text-center text-sm text-slate-400">
+              まだ売却済みの車両がありません。加盟店が車両を売却すると、ここに売上・粗利益の推移が表示されます。
+            </p>
+          )}
+        </CardBody>
+      </Card>
 
       {/* ===== オンボーディング要対応 + プラン別 ===== */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -213,6 +250,15 @@ export default async function AdminDashboardPage() {
           )}
         </CardBody>
       </Card>
+    </div>
+  )
+}
+
+function SalesTile({ label, value, tone = 'text-slate-900' }: { label: string; value: string; tone?: string }) {
+  return (
+    <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+      <div className="text-xs text-slate-500">{label}</div>
+      <div className={`mt-0.5 text-lg font-bold ${tone}`}>{value}</div>
     </div>
   )
 }

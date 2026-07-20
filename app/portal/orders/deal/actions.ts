@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { requireMember } from '@/lib/auth/session'
 import { addDealCost, updateDealCost, deleteDealCost, uploadDealEvidence } from '@/lib/portal/deal-costs'
-import { moveToPrepping, markDelivered, setDealDestination } from '@/lib/portal/deals'
+import { moveToPrepping, markDelivered, setDealDestination, recordSale } from '@/lib/portal/deals'
 import { isPrefecture } from '@/lib/portal/prefectures'
 import type { DealCostKind } from '@/types/database'
 
@@ -106,5 +106,24 @@ export async function dealDeliveredAction(formData: FormData): Promise<{ ok: boo
     return { ok: true }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : '受領処理に失敗しました' }
+  }
+}
+
+/**
+ * Phase 3：加盟店が自分の販売実績を報告する（半自動フロー）。
+ * 販売価格・売却日を登録して案件を「売却済み」にし、粗利益を自動算出する。
+ */
+export async function recordSaleAction(formData: FormData): Promise<{ ok: boolean; error?: string }> {
+  const session = await requireMember()
+  const dealId = String(formData.get('deal_id') ?? '')
+  const salePriceYen = Number(String(formData.get('sale_price') ?? '').replace(/[^\d]/g, ''))
+  const soldAt = String(formData.get('sold_at') ?? '').trim() || null
+  try {
+    await recordSale(dealId, { salePriceYen, soldAt }, session.userId, false)
+    revalidatePath(`/portal/orders/deal/${dealId}`)
+    revalidatePath('/portal/orders')
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : '販売実績の登録に失敗しました' }
   }
 }

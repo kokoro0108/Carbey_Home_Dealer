@@ -376,7 +376,7 @@ export type LedgerEntryRow = {
 }
 
 // 半自動売買フェーズ3: 車両案件ライフサイクル
-export type DealStatusStage = 'ordered' | 'sourcing' | 'prepping' | 'delivered'
+export type DealStatusStage = 'ordered' | 'sourcing' | 'prepping' | 'listing' | 'delivered' | 'sold'
 
 export type VehicleDealRow = {
   id: string
@@ -397,6 +397,13 @@ export type VehicleDealRow = {
   settled: boolean
   settled_amount_yen: number | null
   remaining_yen: number | null
+  // Phase 3 販売実績（migration 035）
+  listed_at: string | null
+  sale_price_yen: number | null
+  sold_at: string | null
+  sold_by: string | null
+  cost_total_yen: number | null
+  gross_profit_yen: number | null // 自動算出（販売価格−費用合計）
   created_at: string
   updated_at: string
 }

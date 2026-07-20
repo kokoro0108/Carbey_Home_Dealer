@@ -9,6 +9,8 @@ import { getFunding, LOAN_STEPS } from '@/lib/portal/funding'
 import { getMemberOrderSummary } from '@/lib/portal/orders'
 import { getMemberCapabilities } from '@/lib/portal/capabilities'
 import { getLedgerBalance, listLedgerEntries } from '@/lib/portal/ledger'
+import { getMemberDealSummary, DEAL_STAGE_LABEL } from '@/lib/portal/deals'
+import { getSalesSummary } from '@/lib/portal/sales'
 import { listInvoices, listInvoicePayments, INVOICE_KIND_LABEL, INVOICE_STATUS_LABEL } from '@/lib/portal/billing'
 import { listConsentLog } from '@/lib/portal/agreements'
 import { MEMBER_STATUS_LABEL, yen } from '@/lib/portal/labels'
@@ -52,9 +54,10 @@ export default async function MemberDetailPage({
     getMember(id), listPlans(false), listPayments(id), listEvidences(id),
   ])
   if (!member) notFound()
-  const [funding, consents, orderSummary, capabilities, ledgerBalance, ledgerEntries, invoices] = await Promise.all([
+  const [funding, consents, orderSummary, capabilities, ledgerBalance, ledgerEntries, invoices, dealSummary, memberSales] = await Promise.all([
     getFunding(member.id), listConsentLog(member.id), getMemberOrderSummary(member.id), getMemberCapabilities(member.id),
     getLedgerBalance(member.id), listLedgerEntries(member.id), listInvoices(member.id),
+    getMemberDealSummary(member.id), getSalesSummary(member.id),
   ])
   // 各請求の消込内訳（入金明細）
   const invoicePayments = await Promise.all(invoices.map((inv) => listInvoicePayments(inv.id)))
@@ -283,6 +286,33 @@ export default async function MemberDetailPage({
             </div>
           </div>
         </div>
+      </div>
+
+      {/* ===== 担当車両サマリ（㉓ 全体連携：車両進捗管理と連動） ===== */}
+      <div className="mb-6 rounded-xl border border-slate-200 bg-white p-5">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+            <ShoppingCart className="h-4 w-4 text-brand-500" /> 担当車両（進捗・販売実績）
+          </h2>
+          <Link href={`/admin/vehicles?member=${member.id}`} className="flex items-center gap-0.5 text-xs font-medium text-brand-600 hover:underline">
+            車両進捗管理 <ChevronRight className="h-3 w-3" />
+          </Link>
+        </div>
+        <div className="grid grid-cols-3 gap-2 text-center sm:grid-cols-5">
+          {(['sourcing', 'prepping', 'listing', 'delivered', 'sold'] as const).map((s) => (
+            <div key={s} className="rounded-lg bg-slate-50 py-2">
+              <div className="text-lg font-bold text-slate-900">{dealSummary[s]}</div>
+              <div className="text-[10px] text-slate-500">{DEAL_STAGE_LABEL[s]}</div>
+            </div>
+          ))}
+        </div>
+        {memberSales.count > 0 && (
+          <div className="mt-3 flex flex-wrap gap-4 border-t border-slate-100 pt-3 text-xs text-slate-600">
+            <span>売上 <span className="font-semibold text-slate-900">{yen(memberSales.revenueYen)}</span></span>
+            <span>粗利益 <span className="font-semibold text-emerald-700">{yen(memberSales.profitYen)}</span></span>
+            <span>利益率 <span className="font-semibold text-slate-900">{memberSales.marginPct}%</span></span>
+          </div>
+        )}
       </div>
 
       {/* ===== 利用可能機能（権限・フロー連動で自動制御／㉕・④） ===== */}

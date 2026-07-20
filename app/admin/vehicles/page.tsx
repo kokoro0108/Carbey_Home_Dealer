@@ -109,7 +109,7 @@ function DealCard({ deal }: { deal: DealWithMember }) {
   const profit = deal.gross_profit_yen ?? 0
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-      <div className="text-sm font-medium text-slate-800">{vehicle}</div>
+      <Link href={`/admin/vehicles/${deal.id}`} className="text-sm font-medium text-slate-800 hover:text-brand-600 hover:underline">{vehicle}</Link>
       <div className="mt-0.5 text-xs text-slate-500">
         {deal.member ? (
           <Link href={`/admin/members/${deal.member.id}`} className="hover:text-brand-600 hover:underline">
@@ -118,6 +118,7 @@ function DealCard({ deal }: { deal: DealWithMember }) {
         ) : '—'}
       </div>
       {deal.order_amount_yen != null && <div className="mt-1 text-xs text-slate-400">予算 {yen(deal.order_amount_yen)}</div>}
+      <Link href={`/admin/vehicles/${deal.id}`} className="mt-1 inline-block text-[11px] font-medium text-brand-600 hover:underline">費用・詳細 →</Link>
 
       {/* ステージ別アクション */}
       <div className="mt-2 border-t border-slate-100 pt-2">

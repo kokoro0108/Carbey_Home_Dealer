@@ -9,6 +9,7 @@ import { PREFECTURES } from '@/lib/portal/prefectures'
 import { yen } from '@/lib/portal/labels'
 import { DarkCard, DarkCardHeader, DarkCardBody } from '@/components/portal-dark/DarkUI'
 import DealBoard from '@/components/portal-dark/DealBoard'
+import SaleRecorder from '@/components/portal-dark/SaleRecorder'
 import DealCostEditor from '@/components/portal-dark/DealCostEditor'
 import { setDestinationAction } from '../actions'
 
@@ -22,7 +23,7 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
 
   const [costs, preview] = await Promise.all([listDealCosts(id), getSettlementPreview(id, DEFAULT_FROM_PREF)])
   const costTotal = costs.reduce((s, c) => s + (c.amount_yen ?? 0), 0)
-  const editable = deal.status !== 'delivered' // 取引終了後は編集不可
+  const editable = deal.status !== 'delivered' && deal.status !== 'sold' // 取引終了後は編集不可
 
   return (
     <div className="mx-auto max-w-3xl space-y-5">
@@ -40,8 +41,8 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
         </p>
       </div>
 
-      {/* 進捗ボード（受領・商品化中の操作もここから） */}
-      {deal.status !== 'delivered' && (
+      {/* 進捗ボード（受領・商品化中の操作もここから）。納品完了・売却済みでは非表示 */}
+      {deal.status !== 'delivered' && deal.status !== 'sold' && (
         <DarkCard>
           <DarkCardHeader title="進捗" />
           <DarkCardBody className="space-y-4">
@@ -104,6 +105,16 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
           </p>
         </DarkCardBody>
       </DarkCard>
+
+      {/* Phase 3：販売実績（納品完了後に加盟店が自分の売却を報告 → 粗利益を自動算出） */}
+      {(deal.status === 'delivered' || deal.status === 'sold') && (
+        <DarkCard>
+          <DarkCardHeader title="販売実績" />
+          <DarkCardBody>
+            <SaleRecorder deal={deal} />
+          </DarkCardBody>
+        </DarkCard>
+      )}
     </div>
   )
 }

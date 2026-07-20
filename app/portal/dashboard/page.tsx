@@ -13,6 +13,7 @@ import { listOwnOrders } from '@/lib/portal/orders'
 import { getDealBoardSummary, listOwnActiveDeals, DEAL_STAGE_LABEL } from '@/lib/portal/deals'
 import { listAnnouncements } from '@/lib/portal/announcements'
 import { listInvoices, INVOICE_KIND_LABEL, INVOICE_STATUS_LABEL } from '@/lib/portal/billing'
+import { getMonthlyReport } from '@/lib/portal/sales'
 import { yen } from '@/lib/portal/labels'
 import { DarkCard, DarkCardHeader, DarkCardBody, DarkStat } from '@/components/portal-dark/DarkUI'
 import { DarkProgressRing } from '@/components/portal-dark/DarkCharts'
@@ -23,7 +24,7 @@ export const dynamic = 'force-dynamic'
 export default async function MemberDashboardPage() {
   const session = await requireMember()
   const member = await getMemberByUserId(session.userId)
-  const [onboarding, orders, announcements, flowInfo, dealSummary, activeDeals, invoices] = await Promise.all([
+  const [onboarding, orders, announcements, flowInfo, dealSummary, activeDeals, invoices, salesReport] = await Promise.all([
     getOwnOnboarding(session.userId),
     listOwnOrders(session.userId),
     listAnnouncements(true, 5),
@@ -31,6 +32,7 @@ export default async function MemberDashboardPage() {
     getDealBoardSummary(session.userId),
     listOwnActiveDeals(session.userId),
     member ? listInvoices(member.id) : Promise.resolve([]),
+    member ? getMonthlyReport(member.id) : Promise.resolve(null),
   ])
 
   // 請求サマリ（PAY-03：消込結果が加盟店側に反映）。未収・遅延・未払いの請求のみ表示。
@@ -40,6 +42,7 @@ export default async function MemberDashboardPage() {
 
   const name = member?.member_name ?? session.name ?? 'ゲスト'
   const flow = flowInfo?.flow ?? null // 'auto' | 'semi' | null(プラン未割当)
+  const fmtMan = (v: number) => `${Math.round(v / 10000)}万`
   const nextAction = onboarding ? getNextAction(onboarding) : null // ㉜ 次にやること
   const obPct = onboarding?.pct ?? 0
   const remainingSteps = onboarding ? onboarding.steps.filter((s) => s.status !== 'done').length : 0
@@ -187,6 +190,20 @@ export default async function MemberDashboardPage() {
         <DarkStat label="対応中オーダー" value={orderCounts.in_progress} unit="件" sub="本部が対応中" />
         <DarkStat label="完了オーダー" value={orderCounts.completed} unit="件" sub="納品済み" />
       </div>
+
+      {/* ===== 利益状況（Phase 3・要件5.4：販売件数サマリー／利益状況） ===== */}
+      {salesReport && (
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <DarkStat label="今月の売上" value={fmtMan(salesReport.monthRevenueYen)} unit="円" sub={`${salesReport.monthCount}台`} />
+          <DarkStat label="今月の粗利益" value={fmtMan(salesReport.monthProfitYen)} unit="円" />
+          <DarkStat label="累計粗利益" value={fmtMan(salesReport.totalProfitYen)} unit="円" sub={`累計${salesReport.totalCount}台`} />
+          <div className="flex items-center justify-center rounded-2xl border border-carbon-700 bg-carbon-900/40">
+            <Link href="/portal/reports" className="flex items-center gap-1 text-sm font-medium text-brand-400 hover:underline">
+              販売レポートを見る <ChevronRight className="h-4 w-4" />
+            </Link>
+          </div>
+        </div>
+      )}
 
       {/* ===== オンボーディング進捗 + お知らせ ===== */}
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">

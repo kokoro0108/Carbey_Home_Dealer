@@ -20,7 +20,9 @@ export const DEAL_STAGE_LABEL: Record<DealStatusStage, string> = {
   ordered: '車両オーダー',
   sourcing: '仕入れ中',
   prepping: '商品化中',
+  listing: '販売中',
   delivered: '納品完了',
+  sold: '売却済み',
 }
 
 /** オーダーから案件を生成し「仕入れ中」に自動遷移（オーダー送信直後に呼ぶ）。 */
@@ -59,6 +61,65 @@ export async function mapDealsByOrderId(orderIds: string[]): Promise<Map<string,
   return map
 }
 
+export type DealWithMember = VehicleDealRow & {
+  member: { id: string; member_name: string; company_name: string | null } | null
+}
+
+/** 本部：全加盟店の案件を加盟店名つきで取得（車両進捗カンバン用）。memberId で絞り込み可。 */
+export async function listAllDeals(memberId?: string): Promise<DealWithMember[]> {
+  const supabase = createServiceRoleClient()
+  let q = supabase
+    .from('vehicle_deals')
+    .select('*, member:members(id, member_name, company_name)')
+    .order('created_at', { ascending: false })
+  if (memberId) q = q.eq('member_id', memberId)
+  const { data, error } = await q
+  if (error) throw new Error(error.message)
+  return (data ?? []) as unknown as DealWithMember[]
+}
+
+/**
+ * 本部が車両案件を起票する（全自動フロー：加盟店はオーダーしないため本部が作成）。
+ * 仕入れ中(sourcing)から開始する。
+ */
+export async function createManualDeal(input: {
+  memberId: string
+  maker?: string | null
+  carModel?: string | null
+  year?: string | null
+  orderAmountYen?: number | null
+}): Promise<VehicleDealRow> {
+  const supabase = createServiceRoleClient()
+  const { data, error } = await supabase
+    .from('vehicle_deals')
+    .insert({
+      member_id: input.memberId,
+      status: 'sourcing',
+      maker: input.maker ?? null,
+      car_model: input.carModel ?? null,
+      year: input.year ?? null,
+      order_amount_yen: input.orderAmountYen ?? null,
+      sourcing_at: new Date().toISOString(),
+    } as never)
+    .select('*')
+    .single<VehicleDealRow>()
+  if (error) throw new Error(error.message)
+  return data
+}
+
+/** 加盟店の案件をステージ別に集計（会員個別画面の車両サマリ・全ステージ）。 */
+export type MemberDealSummary = {
+  sourcing: number; prepping: number; listing: number; delivered: number; sold: number; total: number
+}
+export async function getMemberDealSummary(memberId: string): Promise<MemberDealSummary> {
+  const supabase = createServiceRoleClient()
+  const { data } = await supabase.from('vehicle_deals').select('status').eq('member_id', memberId)
+  const rows = (data ?? []) as { status: DealStatusStage }[]
+  const s: MemberDealSummary = { sourcing: 0, prepping: 0, listing: 0, delivered: 0, sold: 0, total: rows.length }
+  for (const r of rows) if (r.status !== 'ordered') s[r.status]++
+  return s
+}
+
 /** 本部用：全加盟店の案件をステージ別に集計（オーダー管理の一元管理ヘッダー）。 */
 export async function getAdminDealSummary(): Promise<DealBoardSummary> {
   const supabase = createServiceRoleClient()
@@ -74,14 +135,17 @@ export async function getAdminDealSummary(): Promise<DealBoardSummary> {
   return s
 }
 
-/** 加盟店の「進行中」案件（delivered 以外）を新しい順に取得。 */
+/**
+ * 加盟店の「進行中」案件を新しい順に取得。
+ * 売却済み(sold)＝完了は除外。納品完了(delivered)は「販売実績の登録待ち」として進行中に含む。
+ */
 export async function listActiveDeals(memberId: string): Promise<VehicleDealRow[]> {
   const supabase = createServiceRoleClient()
   const { data, error } = await supabase
     .from('vehicle_deals')
     .select('*')
     .eq('member_id', memberId)
-    .neq('status', 'delivered')
+    .neq('status', 'sold')
     .order('created_at', { ascending: false })
   if (error) throw new Error(error.message)
   return (data ?? []) as unknown as VehicleDealRow[]
@@ -277,6 +341,66 @@ export async function settleAndDeliver(dealId: string, userId: string, isStaff: 
   if (error) throw new Error(error.message)
 }
 
+/**
+ * Phase 3：販売中（listing）へ移行（全自動フローの本部操作）。
+ */
+export async function moveToListing(dealId: string, userId: string, isStaff: boolean): Promise<void> {
+  const supabase = createServiceRoleClient()
+  const deal = await getDeal(dealId)
+  if (!deal) throw new Error('案件が見つかりません')
+  if (!isStaff && deal.member_id !== (await resolveMemberId(userId))) throw new Error('権限がありません')
+  if (deal.status === 'sold') throw new Error('売却済みの案件です')
+  const { error } = await supabase
+    .from('vehicle_deals')
+    .update({ status: 'listing', listed_at: new Date().toISOString() } as never)
+    .eq('id', dealId)
+  if (error) throw new Error(error.message)
+}
+
+/**
+ * Phase 3：販売実績を記録して「売却済み（sold）」にする（要件 5.5〜5.6）。
+ *   - 半自動：納品完了(delivered)後に加盟店が自分の売却結果を報告（本部も代理可）
+ *   - 全自動：本部が販売〜清算を記録
+ *   粗利益 = 販売価格 − 費用合計（gross_profit は生成列で自動算出）。
+ *   費用合計のスナップショット：
+ *     1) 精算済み（半自動）→ 精算額 / 2) 費目あり → 費目合計 / 3) どちらも無い（全自動）→ 発注金額
+ */
+export async function recordSale(
+  dealId: string,
+  input: { salePriceYen: number; soldAt?: string | null },
+  userId: string,
+  isStaff: boolean,
+): Promise<void> {
+  if (!input.salePriceYen || input.salePriceYen <= 0) throw new Error('販売価格を入力してください。')
+  const supabase = createServiceRoleClient()
+  const deal = await getDeal(dealId)
+  if (!deal) throw new Error('案件が見つかりません')
+  if (!isStaff && deal.member_id !== (await resolveMemberId(userId))) throw new Error('権限がありません')
+  if (deal.status === 'ordered' || deal.status === 'sourcing') {
+    throw new Error('商品化以降の案件のみ販売実績を登録できます。')
+  }
+
+  let costTotal = deal.settled_amount_yen
+  if (costTotal == null) {
+    const costs = await listDealCosts(dealId)
+    costTotal = costs.length > 0
+      ? costs.reduce((s, c) => s + (c.amount_yen ?? 0), 0)
+      : (deal.order_amount_yen ?? 0)
+  }
+
+  const { error } = await supabase
+    .from('vehicle_deals')
+    .update({
+      status: 'sold',
+      sale_price_yen: input.salePriceYen,
+      sold_at: input.soldAt ?? new Date().toISOString(),
+      sold_by: userId,
+      cost_total_yen: costTotal,
+    } as never)
+    .eq('id', dealId)
+  if (error) throw new Error(error.message)
+}
+
 /** 旧名互換（精算なしの単純遷移）。既存呼び出し用に残す。 */
 export async function markDelivered(dealId: string, userId: string, isStaff: boolean): Promise<void> {
   // 既定の発地（拠点）は東京都とする。将来は本部設定から取得。
@@ -286,15 +410,15 @@ export async function markDelivered(dealId: string, userId: string, isStaff: boo
 /** 発地（拠点）の既定。将来は本部設定（system_settings）から取得。 */
 export const DEFAULT_FROM_PREF = '東京都'
 
-/** 加盟店の取引履歴（delivered 済み）を新しい順に取得。 */
+/** 加盟店の取引履歴（売却済み＝完了）を新しい順に取得。 */
 export async function listDealHistory(memberId: string): Promise<VehicleDealRow[]> {
   const supabase = createServiceRoleClient()
   const { data, error } = await supabase
     .from('vehicle_deals')
     .select('*')
     .eq('member_id', memberId)
-    .eq('status', 'delivered')
-    .order('delivered_at', { ascending: false })
+    .eq('status', 'sold')
+    .order('sold_at', { ascending: false })
   if (error) throw new Error(error.message)
   return (data ?? []) as unknown as VehicleDealRow[]
 }
