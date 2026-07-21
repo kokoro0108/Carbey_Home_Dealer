@@ -4,12 +4,13 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { requireFeature } from '@/lib/auth/session'
 import { createManualDeal, moveToPrepping, moveToListing, recordSale, settleAndDeliver, cancelSettlement, setDealDestination, DEFAULT_FROM_PREF } from '@/lib/portal/deals'
-import { addDealCost, updateDealCost, deleteDealCost, uploadDealEvidence } from '@/lib/portal/deal-costs'
+import { addDealCost, updateDealCost, deleteDealCost, uploadDealEvidence, setDealSourcingEvidence, clearDealSourcingEvidence } from '@/lib/portal/deal-costs'
 import { isPrefecture } from '@/lib/portal/prefectures'
 import type { DealCostKind } from '@/types/database'
 
 const COST_KINDS: DealCostKind[] = ['sourcing', 'prepping', 'shipping', 'other']
 const ATTACH_MAX = 20 * 1024 * 1024
+const EVIDENCE_TYPES = /^(image\/|application\/pdf)/
 
 function num(v: FormDataEntryValue | null): number {
   return Number(String(v ?? '').replace(/[^\d]/g, ''))
@@ -130,6 +131,39 @@ export async function deleteDealCostAction(formData: FormData): Promise<{ ok: bo
   if (!id) return { ok: false, error: '対象がありません' }
   try {
     await deleteDealCost(id)
+    revalidateDeal(dealId)
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : '削除に失敗しました' }
+  }
+}
+
+/** 販売中の仕入れエビデンスを添付/差し替え（本部のみ・1案件1ファイル・画像/PDF）。 */
+export async function uploadDealSourcingEvidenceAction(formData: FormData): Promise<{ ok: boolean; error?: string }> {
+  await requireFeature('reports')
+  const dealId = String(formData.get('deal_id') ?? '')
+  if (!dealId) return { ok: false, error: '対象がありません' }
+  const file = formData.get('evidence')
+  if (!(file instanceof File) || file.size === 0) return { ok: false, error: 'ファイルを選択してください' }
+  if (file.size > ATTACH_MAX) return { ok: false, error: 'ファイルは20MBまでです' }
+  if (!EVIDENCE_TYPES.test(file.type)) return { ok: false, error: '画像またはPDFを添付してください' }
+  try {
+    const buffer = Buffer.from(await file.arrayBuffer())
+    await setDealSourcingEvidence(dealId, { buffer, name: file.name, type: file.type || 'application/octet-stream' })
+    revalidateDeal(dealId)
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : '添付に失敗しました' }
+  }
+}
+
+/** 仕入れエビデンスを削除（本部のみ）。 */
+export async function removeDealSourcingEvidenceAction(formData: FormData): Promise<{ ok: boolean; error?: string }> {
+  await requireFeature('reports')
+  const dealId = String(formData.get('deal_id') ?? '')
+  if (!dealId) return { ok: false, error: '対象がありません' }
+  try {
+    await clearDealSourcingEvidence(dealId)
     revalidateDeal(dealId)
     return { ok: true }
   } catch (e) {

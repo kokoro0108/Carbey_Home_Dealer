@@ -425,6 +425,10 @@ export type VehicleDealRow = {
   // フェーズ6 月額管理手数料（自動売買・migration 040）
   mgmt_fee_yen: number | null // 清算時に預かり金から差し引いた管理手数料。NULL=未課金
   mgmt_fee_months: number | null // 算出に用いた満了月数
+  // 仕入れエビデンス（販売中に本部が添付・migration 042）
+  sourcing_evidence_path: string | null
+  sourcing_evidence_name: string | null
+  sourcing_evidence_at: string | null
   created_at: string
   updated_at: string
 }

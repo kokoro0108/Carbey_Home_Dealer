@@ -9,6 +9,7 @@ import { PREFECTURES } from '@/lib/portal/prefectures'
 import { Card, CardHeader, CardBody } from '@/components/ui/Card'
 import { yen } from '@/lib/portal/labels'
 import AdminDealCostEditor from '@/components/admin/AdminDealCostEditor'
+import AdminSourcingEvidence from '@/components/admin/AdminSourcingEvidence'
 import { dealToPreppingAction, dealToListingAction, recordSaleAction, settleDealAction, setDestinationAction, cancelSettlementAction } from '../actions'
 
 export const dynamic = 'force-dynamic'
@@ -162,6 +163,17 @@ export default async function AdminDealDetailPage({
       </Card>
 
       {/* 販売実績（納品完了・販売中で本部が代理記録） */}
+      {/* 仕入れエビデンス（自動売買・販売中に本部が添付／加盟店は閲覧のみ） */}
+      {deal.flow === 'auto' && (deal.status === 'listing' || deal.status === 'sold') && (
+        <Card>
+          <CardHeader title="仕入れエビデンス（販売中）" />
+          <CardBody>
+            <p className="mb-2 text-xs text-slate-500">販売中の車両について、何を販売しているかが分かる仕入れデータのエビデンスを1点添付します（加盟店の自動売買画面に表示されます）。</p>
+            <AdminSourcingEvidence dealId={deal.id} evidenceName={deal.sourcing_evidence_name} evidenceAt={deal.sourcing_evidence_at} />
+          </CardBody>
+        </Card>
+      )}
+
       {(deal.status === 'delivered' || deal.status === 'listing' || deal.status === 'sold') && (
         <Card>
           <CardHeader title="販売実績" />

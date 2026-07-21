@@ -1,4 +1,4 @@
-import { Bot, Package, Wrench, Store, CheckCircle2, Clock, Gauge } from 'lucide-react'
+import { Bot, Package, Store, CheckCircle2, Clock, Gauge, Lock, Paperclip } from 'lucide-react'
 import { requireMember } from '@/lib/auth/session'
 import { getMemberByUserId } from '@/lib/portal/members'
 import { getOwnAutoCapacity, getMemberWaitingPosition } from '@/lib/portal/auto-trading'
@@ -9,12 +9,13 @@ import type { DealStatusStage, VehicleDealRow } from '@/types/database'
 
 export const dynamic = 'force-dynamic'
 
-// 全自動フローの進捗列（仕入れ中 → 商品化中 → 販売中 → 売却済み）
-const FLOW_COLUMNS: { key: DealStatusStage; label: string; icon: typeof Package; tone: string; accent: string }[] = [
-  { key: 'sourcing', label: '仕入れ中', icon: Package, tone: 'text-sky-300', accent: 'border-sky-500/40' },
-  { key: 'prepping', label: '商品化中', icon: Wrench, tone: 'text-amber-300', accent: 'border-amber-500/40' },
-  { key: 'listing', label: '販売中', icon: Store, tone: 'text-violet-300', accent: 'border-violet-500/40' },
-  { key: 'sold', label: '売却済み', icon: CheckCircle2, tone: 'text-emerald-300', accent: 'border-emerald-500/40' },
+// 全自動フローの進捗列（仕入れ中 → 販売中 → 精算完了）。
+//   現フェーズでは「販売中・精算完了」の2段階のみ運用（active）。
+//   「仕入れ中」は第二フェーズから拡張（preview 表示・案件は個別表示しない）。ロジックは全段階を構築済み。
+const FLOW_STAGES: { key: DealStatusStage; label: string; icon: typeof Package; tone: string; accent: string; active: boolean }[] = [
+  { key: 'sourcing', label: '仕入れ中', icon: Package, tone: 'text-slate-400', accent: 'border-carbon-700', active: false },
+  { key: 'listing', label: '販売中', icon: Store, tone: 'text-violet-300', accent: 'border-violet-500/40', active: true },
+  { key: 'sold', label: '精算完了', icon: CheckCircle2, tone: 'text-emerald-300', accent: 'border-emerald-500/40', active: true },
 ]
 
 function fmtDate(v: string | null): string {
@@ -41,8 +42,18 @@ function DealCard({ deal }: { deal: VehicleDealRow }) {
       ) : (
         <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
           <span>予算 {yen(deal.order_amount_yen)}</span>
-          <span>{deal.status === 'listing' ? `掲載 ${fmtDate(deal.listed_at)}` : `着手 ${fmtDate(deal.sourcing_at)}`}</span>
+          <span>掲載 {fmtDate(deal.listed_at)}</span>
         </div>
+      )}
+      {deal.sourcing_evidence_path && (
+        <a
+          href={`/api/portal/deal-sourcing-evidence/${deal.id}`}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-brand-300 hover:underline"
+        >
+          <Paperclip className="h-3 w-3" /> 仕入れエビデンス
+        </a>
       )}
     </div>
   )
@@ -111,34 +122,48 @@ export default async function PortalAutoPage() {
         ) : canReserve ? <ReserveButton /> : null}
       </div>
 
-      {/* 進捗フロー */}
+      {/* 進捗フロー（現フェーズは「販売中・精算完了」の2段階のみ運用） */}
       <div>
-        <h2 className="mb-3 text-sm font-semibold text-white">案件の進捗フロー</h2>
-        {deals.length === 0 ? (
-          <div className="rounded-2xl border border-carbon-700 bg-carbon-900/60 p-8 text-center text-sm text-slate-400">
-            まだ自動売買の案件はありません。受注可能になると、本部が仕入れ〜販売を代行し、ここに進捗が表示されます。
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {FLOW_COLUMNS.map((col) => {
-              const items = byStage(col.key)
-              const Icon = col.icon
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <h2 className="text-sm font-semibold text-white">案件の進捗フロー</h2>
+          <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-300">
+            現在は「販売中・精算完了」の2段階で管理します（「仕入れ中」は第二フェーズから拡張します）
+          </span>
+        </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          {FLOW_STAGES.map((col) => {
+            const Icon = col.icon
+            // 仕入れ中（未対応）は予告のみ・案件は個別表示しない
+            if (!col.active) {
               return (
-                <div key={col.key} className={`rounded-2xl border ${col.accent} bg-carbon-900/40 p-3`}>
+                <div key={col.key} className={`relative rounded-2xl border border-dashed ${col.accent} bg-carbon-900/20 p-3 opacity-70`}>
                   <div className="mb-2 flex items-center justify-between px-1">
                     <span className={`flex items-center gap-1.5 text-xs font-semibold ${col.tone}`}><Icon className="h-4 w-4" /> {col.label}</span>
-                    <span className="rounded-full bg-carbon-700 px-2 py-0.5 text-[11px] text-slate-300">{items.length}</span>
+                    <Lock className="h-3.5 w-3.5 text-slate-500" />
                   </div>
-                  <div className="space-y-2">
-                    {items.length === 0 ? (
-                      <p className="px-1 py-4 text-center text-[11px] text-slate-600">なし</p>
-                    ) : items.map((d) => <DealCard key={d.id} deal={d} />)}
+                  <div className="flex flex-col items-center gap-1 px-1 py-6 text-center">
+                    <span className="rounded-full bg-carbon-700 px-2 py-0.5 text-[10px] text-slate-400">第二フェーズから拡張します</span>
+                    <p className="text-[11px] text-slate-600">この段階の進捗管理は今後のアップデートで対応予定です。</p>
                   </div>
                 </div>
               )
-            })}
-          </div>
-        )}
+            }
+            const items = byStage(col.key)
+            return (
+              <div key={col.key} className={`rounded-2xl border ${col.accent} bg-carbon-900/40 p-3`}>
+                <div className="mb-2 flex items-center justify-between px-1">
+                  <span className={`flex items-center gap-1.5 text-xs font-semibold ${col.tone}`}><Icon className="h-4 w-4" /> {col.label}</span>
+                  <span className="rounded-full bg-carbon-700 px-2 py-0.5 text-[11px] text-slate-300">{items.length}</span>
+                </div>
+                <div className="space-y-2">
+                  {items.length === 0 ? (
+                    <p className="px-1 py-4 text-center text-[11px] text-slate-600">なし</p>
+                  ) : items.map((d) => <DealCard key={d.id} deal={d} />)}
+                </div>
+              </div>
+            )
+          })}
+        </div>
       </div>
     </div>
   )
