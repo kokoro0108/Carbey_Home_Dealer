@@ -184,15 +184,6 @@ export default async function AdminDealDetailPage({
                 <div><dt className="text-xs text-slate-500">費用合計</dt><dd className="font-semibold text-slate-900">{yen(deal.cost_total_yen)}</dd></div>
                 <div><dt className="text-xs text-slate-500">粗利益</dt><dd className={`font-semibold ${(deal.gross_profit_yen ?? 0) >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>{yen(deal.gross_profit_yen)}</dd></div>
                 <div><dt className="text-xs text-slate-500">売却日</dt><dd className="font-semibold text-slate-900">{deal.sold_at ? new Date(deal.sold_at).toLocaleDateString('ja-JP') : '—'}</dd></div>
-                {deal.flow === 'auto' && deal.mgmt_fee_yen != null && (
-                  <div className="col-span-2 sm:col-span-4 border-t border-slate-100 pt-2">
-                    <dt className="text-xs text-slate-500">月額管理手数料（清算時に預かり金から差引）</dt>
-                    <dd className="font-semibold text-amber-700">
-                      {yen(deal.mgmt_fee_yen)}
-                      <span className="ml-1 text-xs font-normal text-slate-500">（満了 {deal.mgmt_fee_months ?? 0} か月分）</span>
-                    </dd>
-                  </div>
-                )}
               </dl>
             ) : (
               <>
@@ -210,7 +201,7 @@ export default async function AdminDealDetailPage({
                 </form>
                 {deal.flow === 'auto' && (
                   <p className="mt-2 text-xs text-slate-500">
-                    自動売買では、清算（売却の記録）時に月額管理手数料（運用開始〜清算の満了月数 × プランの月額）が預かり金から自動で差し引かれます。
+                    ※ 月額管理手数料は案件清算時ではなく、枠数に応じた月次課金です（会員詳細の「月額管理手数料（月次）」で本部が相殺／請求します）。諸経費は売却の粗利で相殺されます。
                   </p>
                 )}
               </>

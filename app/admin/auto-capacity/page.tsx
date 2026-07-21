@@ -5,12 +5,13 @@ import { getGlobalAutoCapacity, getAutoSettings, listAutoMembers, listWaitingRes
 import { Card, CardHeader, CardBody } from '@/components/ui/Card'
 import { StatCard } from '@/components/ui/StatCard'
 import { yen } from '@/lib/portal/labels'
-import { updateAutoSettingsAction, moveReservationAction, cancelReservationAction, assignReservationAction } from './actions'
+import { updateAutoSettingsAction, moveReservationAction, cancelReservationAction, assignReservationAction, runAllMgmtFeeAction } from './actions'
 
 export const dynamic = 'force-dynamic'
 
-export default async function AutoCapacityPage() {
+export default async function AutoCapacityPage({ searchParams }: { searchParams: Promise<{ msg?: string }> }) {
   await requireFeature('reports')
+  const sp = await searchParams
   const [global, settings, members, reservations] = await Promise.all([
     getGlobalAutoCapacity(),
     getAutoSettings(),
@@ -21,12 +22,20 @@ export default async function AutoCapacityPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="flex items-center gap-2 text-xl font-bold text-slate-900">
-          <Gauge className="h-5 w-5 text-brand-500" /> 自動売買 キャパ・受注管理
-        </h1>
-        <p className="text-sm text-slate-500">自動売買の同時運用台数（全体上限）と、加盟者ごとの枠・稼働・受注可否を一元管理します。</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="flex items-center gap-2 text-xl font-bold text-slate-900">
+            <Gauge className="h-5 w-5 text-brand-500" /> 自動売買 キャパ・受注管理
+          </h1>
+          <p className="text-sm text-slate-500">自動売買の同時運用台数（全体上限）と、加盟者ごとの枠・稼働・受注可否を一元管理します。</p>
+        </div>
+        <form action={runAllMgmtFeeAction}>
+          <button className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-100">
+            月額管理手数料を一括実行
+          </button>
+        </form>
       </div>
+      {sp.msg && <div className="rounded-lg bg-green-50 px-4 py-3 text-sm text-green-700">{sp.msg}</div>}
 
       {/* 全体キャパ */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">

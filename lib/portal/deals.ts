@@ -439,32 +439,9 @@ export async function recordSale(
 
   const soldAt = input.soldAt ?? new Date().toISOString()
 
-  // フェーズ6：自動売買（auto）の清算時に月額管理手数料を預かり金から差し引く。
-  //   手数料 = 満了月数（運用開始 sourcing_at 〜 清算 soldAt）× プランの mgmt_fee_monthly_yen。
-  //   端数月は0・最短0。deal.mgmt_fee_yen が未設定のときだけ課金（二重課金防止）。
-  let mgmtFeeYen: number | null = deal.mgmt_fee_yen ?? null
-  let mgmtFeeMonths: number | null = deal.mgmt_fee_months ?? null
-  if (deal.flow === 'auto' && deal.mgmt_fee_yen == null) {
-    const { data: mp } = await supabase
-      .from('members')
-      .select('plan:plans(mgmt_fee_monthly_yen)')
-      .eq('id', deal.member_id)
-      .maybeSingle<{ plan: { mgmt_fee_monthly_yen: number } | null }>()
-    const monthly = mp?.plan?.mgmt_fee_monthly_yen ?? 0
-    const months = deal.sourcing_at ? completedMonths(deal.sourcing_at, soldAt) : 0
-    mgmtFeeMonths = months
-    mgmtFeeYen = monthly * months
-    if (mgmtFeeYen > 0) {
-      await addLedgerEntry({
-        memberId: deal.member_id,
-        kind: 'mgmt_fee',
-        amount: mgmtFeeYen,
-        note: `月額管理手数料：${[deal.maker, deal.car_model].filter(Boolean).join(' ')}（${months}か月 × ${monthly.toLocaleString()}円）`,
-        dealId,
-        createdBy: isStaff ? userId : null,
-      })
-    }
-  }
+  // 【2026-07-21 改定】月額管理手数料は「案件清算時」ではなく「枠数連動の毎月課金」に変更したため、
+  //   ここでは手数料の差引を行わない（lib/portal/mgmt-fee.ts の月次実行に一本化）。
+  //   諸経費（仕入/整備/陸送/代行手数料）の売上相殺は従来どおり cost_total_yen / 粗利で扱う。
 
   const { error } = await supabase
     .from('vehicle_deals')
@@ -474,8 +451,6 @@ export async function recordSale(
       sold_at: soldAt,
       sold_by: userId,
       cost_total_yen: costTotal,
-      mgmt_fee_yen: mgmtFeeYen,
-      mgmt_fee_months: mgmtFeeMonths,
     } as never)
     .eq('id', dealId)
   if (error) throw new Error(error.message)

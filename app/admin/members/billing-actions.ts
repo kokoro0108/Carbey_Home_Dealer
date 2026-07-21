@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { requireFeature } from '@/lib/auth/session'
 import { createInvoice, createSlotPurchaseInvoice, recordPayment, markBilled, cancelInvoice, deleteInvoice } from '@/lib/portal/billing'
+import { runMonthlyMgmtFee } from '@/lib/portal/mgmt-fee'
 import { redirect } from 'next/navigation'
 import type { InvoiceKind } from '@/types/database'
 
@@ -10,6 +11,24 @@ const KINDS: InvoiceKind[] = ['joining', 'system_fee', 'monthly', 'royalty', 'ma
 
 function num(v: FormDataEntryValue | null): number {
   return Number(String(v ?? '').replace(/[^\d]/g, ''))
+}
+
+/** 本部が当該加盟者の月額管理手数料（枠数連動・満了月分）を月次で相殺／請求する。 */
+export async function runMemberMgmtFeeAction(formData: FormData) {
+  const session = await requireFeature('members')
+  const memberId = String(formData.get('member_id') ?? '')
+  if (!memberId) return
+  try {
+    const r = await runMonthlyMgmtFee(memberId, session.userId)
+    revalidatePath(`/admin/members/${memberId}`)
+    const msg = r.charged
+      ? `月額管理手数料を実行：${r.months}か月・総額${r.gross.toLocaleString()}円（預かり金相殺${r.fromDeposit.toLocaleString()}円／不足請求${r.shortfall.toLocaleString()}円）`
+      : `課金はありませんでした（${r.skippedReason ?? '対象なし'}）`
+    redirect(`/admin/members/${memberId}?msg=${encodeURIComponent(msg)}`)
+  } catch (e) {
+    if (e instanceof Error && e.message.includes('NEXT_REDIRECT')) throw e
+    redirect(`/admin/members/${memberId}?error=${encodeURIComponent(e instanceof Error ? e.message : '実行に失敗しました')}`)
+  }
 }
 
 /** 本部が自動売買の枠購入を請求する（1枠=10万円）。消込完了で枠が自動加算される。 */

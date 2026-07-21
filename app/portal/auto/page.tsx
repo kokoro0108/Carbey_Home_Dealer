@@ -2,6 +2,7 @@ import { Bot, Package, Store, CheckCircle2, Clock, Gauge, Lock, Paperclip } from
 import { requireMember } from '@/lib/auth/session'
 import { getMemberByUserId } from '@/lib/portal/members'
 import { getOwnAutoCapacity, getMemberWaitingPosition } from '@/lib/portal/auto-trading'
+import { getMgmtFeePreview } from '@/lib/portal/mgmt-fee'
 import { listOwnAutoDeals } from '@/lib/portal/deals'
 import ReserveButton from '@/components/portal-dark/ReserveButton'
 import { yen } from '@/lib/portal/labels'
@@ -34,9 +35,6 @@ function DealCard({ deal }: { deal: VehicleDealRow }) {
         <dl className="mt-2 space-y-1 text-[11px]">
           <div className="flex justify-between"><dt className="text-slate-500">販売価格</dt><dd className="font-medium text-slate-200">{yen(deal.sale_price_yen)}</dd></div>
           <div className="flex justify-between"><dt className="text-slate-500">粗利益</dt><dd className={`font-semibold ${(deal.gross_profit_yen ?? 0) >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>{yen(deal.gross_profit_yen)}</dd></div>
-          {deal.mgmt_fee_yen != null && (
-            <div className="flex justify-between"><dt className="text-slate-500">管理手数料</dt><dd className="text-amber-300">−{yen(deal.mgmt_fee_yen)}<span className="ml-1 text-slate-500">({deal.mgmt_fee_months ?? 0}か月)</span></dd></div>
-          )}
           <div className="flex justify-between"><dt className="text-slate-500">売却日</dt><dd className="text-slate-400">{fmtDate(deal.sold_at)}</dd></div>
         </dl>
       ) : (
@@ -74,9 +72,10 @@ export default async function PortalAutoPage() {
     )
   }
 
-  const [deals, waitingPos] = await Promise.all([
+  const [deals, waitingPos, mgmtFee] = await Promise.all([
     listOwnAutoDeals(session.userId),
     getMemberWaitingPosition(member.id),
+    getMgmtFeePreview(member.id),
   ])
   const canReserve = !capacity.canAccept && !capacity.depositLocked && capacity.availableSlots > 0 && capacity.globalAvailable <= 0
   const byStage = (key: DealStatusStage) => deals.filter((d) => d.status === key)
@@ -121,6 +120,20 @@ export default async function PortalAutoPage() {
           </div>
         ) : canReserve ? <ReserveButton /> : null}
       </div>
+
+      {/* 月額管理手数料（枠数連動・毎月）— 上位プランのみ */}
+      {mgmtFee.eligible && (
+        <div className="rounded-2xl border border-carbon-700 bg-carbon-900/60 p-5">
+          <h2 className="mb-2 text-sm font-semibold text-white">月額管理手数料</h2>
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <span className="text-2xl font-bold text-white">{yen(mgmtFee.monthlyFee)}<span className="ml-1 text-sm font-normal text-slate-400">/月</span></span>
+            <span className="text-xs text-slate-400">（枠数 {mgmtFee.slots} − 1）× {yen(mgmtFee.unit)}</span>
+          </div>
+          <p className="mt-2 text-xs text-slate-500">
+            毎月、預かり金（運転資金）から相殺されます。残高が不足した場合は不足分の請求（デポジットのお願い）を発行しますので、ご入金をお願いします。枠を増やすと月額も増えます。
+          </p>
+        </div>
+      )}
 
       {/* 進捗フロー（現フェーズは「販売中・精算完了」の2段階のみ運用） */}
       <div>

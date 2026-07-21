@@ -3,9 +3,25 @@
 import { revalidatePath } from 'next/cache'
 import { requireFeature } from '@/lib/auth/session'
 import { setAutoSetting, requestReservation, moveReservation, cancelReservation, markReservationAssigned } from '@/lib/portal/auto-trading'
+import { runMonthlyMgmtFeeAll } from '@/lib/portal/mgmt-fee'
+import { redirect } from 'next/navigation'
 
 function num(v: FormDataEntryValue | null): number {
   return Number(String(v ?? '').replace(/[^\d]/g, ''))
+}
+
+/** 全対象加盟者（上位プランの自動売買）の月額管理手数料を月次で一括実行する（本部）。 */
+export async function runAllMgmtFeeAction() {
+  const session = await requireFeature('reports')
+  const results = await runMonthlyMgmtFeeAll(session.userId)
+  const charged = results.filter((r) => r.charged)
+  const gross = charged.reduce((s, r) => s + r.gross, 0)
+  const invoiced = charged.reduce((s, r) => s + r.shortfall, 0)
+  revalidatePath('/admin/auto-capacity')
+  const msg = charged.length === 0
+    ? '当月分の課金対象はありませんでした。'
+    : `${charged.length}名に実行：総額${gross.toLocaleString()}円（うち不足請求${invoiced.toLocaleString()}円）`
+  redirect(`/admin/auto-capacity?msg=${encodeURIComponent(msg)}`)
 }
 
 /** 全体設定（同時運用上限・最低預かり金）を更新する（本部）。 */

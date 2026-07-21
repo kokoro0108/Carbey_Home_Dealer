@@ -79,3 +79,14 @@ export async function notifyAdmin(kind: string, title: string, message?: string)
     .insert({ audience: 'admin', kind, title, message: message ?? null } as never)
   if (error) throw new Error(error.message)
 }
+
+/** 本部→加盟店の通知（その加盟店の user_id 宛て）。ログイン未紐付けなら何もしない。 */
+export async function notifyMember(memberId: string, kind: string, title: string, message?: string): Promise<void> {
+  const supabase = createServiceRoleClient()
+  const { data: member } = await supabase.from('members').select('user_id').eq('id', memberId).maybeSingle<{ user_id: string | null }>()
+  if (!member?.user_id) return
+  const { error } = await supabase
+    .from('notifications')
+    .insert({ user_id: member.user_id, audience: 'user', kind, title, message: message ?? null } as never)
+  if (error) throw new Error(error.message)
+}

@@ -19,7 +19,8 @@ import { updateMemberAction, issueCredentialsAction } from '../actions'
 import { reviewEvidenceAction } from '../evidence-actions'
 import { confirmSelfAction, setAdminStepAction } from '../funding-actions'
 import { addLedgerEntryAction, deleteLedgerEntryAction } from '../ledger-actions'
-import { createInvoiceAction, createSlotPurchaseAction, recordPaymentAction, markBilledAction, cancelInvoiceAction, deleteInvoiceAction } from '../billing-actions'
+import { createInvoiceAction, createSlotPurchaseAction, runMemberMgmtFeeAction, recordPaymentAction, markBilledAction, cancelInvoiceAction, deleteInvoiceAction } from '../billing-actions'
+import { getMgmtFeePreview, listMgmtFeeRuns } from '@/lib/portal/mgmt-fee'
 import MemberFormFields from '../MemberFormFields'
 
 const INVOICE_STATUS_TONE: Record<string, string> = {
@@ -55,10 +56,11 @@ export default async function MemberDetailPage({
     getMember(id), listPlans(false), listPayments(id), listEvidences(id),
   ])
   if (!member) notFound()
-  const [funding, consents, orderSummary, capabilities, ledgerBalance, ledgerEntries, invoices, dealSummary, memberSales] = await Promise.all([
+  const [funding, consents, orderSummary, capabilities, ledgerBalance, ledgerEntries, invoices, dealSummary, memberSales, mgmtFee, mgmtFeeRuns] = await Promise.all([
     getFunding(member.id), listConsentLog(member.id), getMemberOrderSummary(member.id), getMemberCapabilities(member.id),
     getLedgerBalance(member.id), listLedgerEntries(member.id), listInvoices(member.id),
     getMemberDealSummary(member.id), getSalesSummary(member.id),
+    getMgmtFeePreview(member.id), listMgmtFeeRuns(member.id),
   ])
   // 各請求の消込内訳（入金明細）
   const invoicePayments = await Promise.all(invoices.map((inv) => listInvoicePayments(inv.id)))
@@ -149,6 +151,9 @@ export default async function MemberDetailPage({
       )}
       {sp.error && !['contract_date_required', 'email_duplicate', 'plan_required', 'grant_required'].includes(sp.error) && (
         <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{sp.error}</div>
+      )}
+      {sp.msg && (
+        <div className="mb-4 rounded-lg bg-green-50 px-4 py-3 text-sm text-green-700">{sp.msg}</div>
       )}
 
       {/* ===== ログイン発行（本部が直接パスワードを発行する発行型フロー） ===== */}
@@ -588,16 +593,25 @@ export default async function MemberDetailPage({
           </div>
         </div>
 
-        {/* 自動売買の枠購入（1枠=10万円）— 消込完了で auto_slots が自動加算される（⑦フェーズ5） */}
+        {/* 自動売買の枠購入（3枠目以降・1枠=10万円）— 消込完了で auto_slots が自動加算（⑦フェーズ5 / 2026-07-21 改定） */}
         {member.grant_auto && (() => {
           const currentSlots = member.auto_slots ?? 0
+          const planDefault = member.plan?.default_auto_slots ?? 0
+          const purchasable = planDefault >= 2 // エコノミー等（既定1枠）は枠固定で追加購入不可
           const remainingSlots = Math.max(0, 10 - currentSlots)
+          if (!purchasable) {
+            return (
+              <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-500">
+                このプランは枠数が固定（1枠）のため、追加の枠購入はできません。枠の追加は上位プラン（既定2枠・3枠目以降が購入対象）で可能です。
+              </div>
+            )
+          }
           return (
             <form action={createSlotPurchaseAction} className="mb-4 rounded-xl border border-brand-200 bg-brand-50/60 p-4">
               <input type="hidden" name="member_id" value={member.id} />
               <div className="mb-2 flex items-center gap-2">
                 <span className="text-sm font-semibold text-slate-900">販売可能枠を購入</span>
-                <span className="text-xs text-slate-500">1枠=100,000円／保有 {currentSlots} 枠・上限10枠</span>
+                <span className="text-xs text-slate-500">1枠=100,000円／保有 {currentSlots} 枠・上限10枠（3枠目以降が購入対象）</span>
               </div>
               <div className="flex flex-wrap items-end gap-3">
                 <div>
@@ -621,12 +635,47 @@ export default async function MemberDetailPage({
                 <p className="text-xs text-slate-500">
                   {remainingSlots === 0
                     ? '既に上限（10枠）に達しています。'
-                    : '請求を発行し、入金消込が完了すると自動的に枠が付与されます。'}
+                    : '請求を発行し、入金消込が完了すると自動的に枠が付与されます。枠数に応じて月額管理手数料も増減します。'}
                 </p>
               </div>
             </form>
           )
         })()}
+
+        {/* 月額管理手数料（枠数連動・本部が月次で相殺／請求）— 2026-07-21 改定 */}
+        {member.grant_auto && mgmtFee.eligible && (
+          <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50/50 p-4">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <span className="text-sm font-semibold text-slate-900">月額管理手数料（月次）</span>
+              <span className="text-xs text-slate-500">月額 =（枠数−1）× {yen(mgmtFee.unit)} ／ 現在 {mgmtFee.slots}枠 = <span className="font-semibold text-amber-700">{yen(mgmtFee.monthlyFee)}</span>/月</span>
+            </div>
+            <div className="mb-3 grid grid-cols-2 gap-2 text-xs text-slate-600 sm:grid-cols-4">
+              <div>起算日<div className="font-medium text-slate-800">{mgmtFee.anchor ?? '未設定'}</div></div>
+              <div>課金済み<div className="font-medium text-slate-800">{mgmtFee.billedMonths} か月</div></div>
+              <div>今回課金可能<div className="font-medium text-slate-800">{mgmtFee.dueMonths} か月 = {yen(mgmtFee.dueGross)}</div></div>
+              <div>預かり金残高<div className="font-medium text-slate-800">{yen(mgmtFee.balance)}</div></div>
+            </div>
+            <form action={runMemberMgmtFeeAction} className="flex flex-wrap items-center gap-2">
+              <input type="hidden" name="member_id" value={member.id} />
+              <button className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700">今月分を相殺／請求する</button>
+              <span className="text-xs text-slate-500">満了月分を預かり金から相殺し、不足は請求（デポジット依頼）＋通知します。</span>
+            </form>
+            {mgmtFeeRuns.length > 0 && (
+              <div className="mt-3 space-y-1 border-t border-amber-100 pt-2">
+                <div className="text-[11px] font-medium text-slate-500">実行履歴</div>
+                {mgmtFeeRuns.slice(0, 6).map((r) => (
+                  <div key={r.id} className="flex flex-wrap items-center gap-x-3 text-[11px] text-slate-600">
+                    <span className="text-slate-400">{new Date(r.created_at).toLocaleDateString('ja-JP')}</span>
+                    <span>{r.months}か月・{r.slots}枠</span>
+                    <span>総額 {yen(r.gross_yen)}</span>
+                    <span className="text-green-700">預かり金 {yen(r.from_deposit_yen)}</span>
+                    {r.invoiced_yen > 0 && <span className="text-amber-700">請求 {yen(r.invoiced_yen)}</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* 請求を作成 */}
         <form action={createInvoiceAction} className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-4">

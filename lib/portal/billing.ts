@@ -94,15 +94,24 @@ export async function createInvoice(input: {
 }
 
 /**
- * 枠購入の請求を発行する（⑦フェーズ5）。1枠=10万円。
+ * 枠購入の請求を発行する（⑦フェーズ5 / 2026-07-21 改定）。1枠=10万円。
  * 入金消込が完了（paid）すると、DBトリガで members.auto_slots が自動加算される（最大10）。
- * 購入後に上限(10)を超える枠数は受け付けない。
+ *   - エコノミー等（プラン既定 < 2枠）は枠固定のため追加購入不可。
+ *   - 上位プラン（既定2枠）は3枠目以降を10万円/枠で購入（最大10枠）。
  */
 export async function createSlotPurchaseInvoice(input: { memberId: string; slotCount: number; dueDate?: string | null }): Promise<void> {
   if (input.slotCount <= 0) throw new Error('購入枠数を入力してください。')
   const supabase = createServiceRoleClient()
-  const { data: member } = await supabase.from('members').select('auto_slots').eq('id', input.memberId).maybeSingle<{ auto_slots: number }>()
+  const { data: member } = await supabase
+    .from('members')
+    .select('auto_slots, plan:plans(default_auto_slots)')
+    .eq('id', input.memberId)
+    .maybeSingle<{ auto_slots: number; plan: { default_auto_slots: number } | null }>()
   const current = member?.auto_slots ?? 0
+  const planDefault = member?.plan?.default_auto_slots ?? 0
+  if (planDefault < 2) {
+    throw new Error('このプランは枠数が固定（追加購入不可）です。枠の追加購入は上位プラン（既定2枠・3枠目以降が購入対象）でのみ可能です。')
+  }
   if (current + input.slotCount > MAX_SLOTS) {
     throw new Error(`枠は1加盟者あたり最大${MAX_SLOTS}枠までです（現在${current}枠・購入${input.slotCount}枠は上限超過）。`)
   }

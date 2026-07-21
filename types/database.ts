@@ -88,6 +88,10 @@ export type MemberRow = {
   auto_slots: number
   /** 1枠あたり必要運用資金（⑦・migration 036）。既定400万・本部が加盟者ごと設定可 */
   capital_per_slot_yen: number
+  /** 月額管理手数料の起算日＝枠取得日（migration 043）。NULL=初回課金時に当日で起算 */
+  mgmt_fee_anchor: string | null
+  /** 月額管理手数料の課金済み満了月数（migration 043・二重課金防止） */
+  mgmt_fee_billed_months: number
   joining_fee_yen: number | null
   monthly_fee_yen: number | null
   working_capital_yen: number | null
@@ -120,6 +124,8 @@ export type MemberInsert = {
   trading_override?: boolean
   auto_slots?: number
   capital_per_slot_yen?: number
+  mgmt_fee_anchor?: string | null
+  mgmt_fee_billed_months?: number
   joining_fee_yen?: number | null
   monthly_fee_yen?: number | null
   working_capital_yen?: number | null
@@ -541,6 +547,22 @@ export type MemberBudgetAllocRow = {
   updated_at: string
 }
 
+/** 月額管理手数料の月次課金 実行履歴（migration 043）。 */
+export type MemberMgmtFeeRunRow = {
+  id: string
+  member_id: string
+  months: number
+  slots: number
+  unit_yen: number
+  gross_yen: number
+  from_deposit_yen: number
+  invoiced_yen: number
+  invoice_id: string | null
+  ran_by: string | null
+  note: string | null
+  created_at: string
+}
+
 export type Database = {
   portal: {
     Tables: {
@@ -548,6 +570,7 @@ export type Database = {
       system_settings: { Row: SystemSettingRow; Insert: Partial<SystemSettingRow>; Update: Partial<SystemSettingRow> }
       auto_reservations: { Row: AutoReservationRow; Insert: Partial<AutoReservationRow>; Update: Partial<AutoReservationRow> }
       member_budget_alloc: { Row: MemberBudgetAllocRow; Insert: Partial<MemberBudgetAllocRow>; Update: Partial<MemberBudgetAllocRow> }
+      member_mgmt_fee_runs: { Row: MemberMgmtFeeRunRow; Insert: Partial<MemberMgmtFeeRunRow>; Update: Partial<MemberMgmtFeeRunRow> }
       users: { Row: PortalUserRow; Insert: Partial<PortalUserRow>; Update: Partial<PortalUserRow> }
       members: { Row: MemberRow; Insert: MemberInsert; Update: Partial<MemberInsert> }
       payments: { Row: PaymentRow; Insert: Partial<PaymentRow>; Update: Partial<PaymentRow> }
