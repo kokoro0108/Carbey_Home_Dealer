@@ -1,5 +1,6 @@
 import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { MAX_SLOTS, SLOT_PRICE_YEN } from '@/lib/portal/auto-trading'
+import { getConsumptionTaxPct, taxOf } from '@/lib/portal/mgmt-fee'
 import type { InvoiceRow, InvoiceKind, InvoiceStatus, PaymentRow } from '@/types/database'
 
 /**
@@ -94,10 +95,11 @@ export async function createInvoice(input: {
 }
 
 /**
- * 枠購入の請求を発行する（⑦フェーズ5 / 2026-07-21 改定）。1枠=10万円。
+ * 枠購入の請求を発行する（⑦フェーズ5 / 2026-07-21 改定 / 2026-07-23 消費税対応）。1枠=10万円（税抜）。
  * 入金消込が完了（paid）すると、DBトリガで members.auto_slots が自動加算される（最大10）。
  *   - エコノミー等（プラン既定 < 2枠）は枠固定のため追加購入不可。
- *   - 上位プラン（既定2枠）は3枠目以降を10万円/枠で購入（最大10枠）。
+ *   - 上位プラン（既定2枠）は3枠目以降を10万円/枠（税抜）で購入（最大10枠）。
+ *   - 請求額は税込（税抜 ＋ 消費税）。税率は本部設定（consumption_tax_pct）。
  */
 export async function createSlotPurchaseInvoice(input: { memberId: string; slotCount: number; dueDate?: string | null }): Promise<void> {
   if (input.slotCount <= 0) throw new Error('購入枠数を入力してください。')
@@ -115,17 +117,20 @@ export async function createSlotPurchaseInvoice(input: { memberId: string; slotC
   if (current + input.slotCount > MAX_SLOTS) {
     throw new Error(`枠は1加盟者あたり最大${MAX_SLOTS}枠までです（現在${current}枠・購入${input.slotCount}枠は上限超過）。`)
   }
-  const amount = input.slotCount * SLOT_PRICE_YEN
+  const taxPct = await getConsumptionTaxPct()
+  const excl = input.slotCount * SLOT_PRICE_YEN
+  const tax = taxOf(excl, taxPct)
+  const total = excl + tax // 税込
   const { error } = await supabase.from('invoices').insert({
     member_id: input.memberId,
     kind: 'slot_fee',
     title: `販売可能枠 ${input.slotCount}枠の購入`,
-    amount_yen: amount,
+    amount_yen: total,
     slot_count: input.slotCount,
     due_date: input.dueDate ?? null,
     status: 'billed',
     billed_at: new Date().toISOString(),
-    note: `枠購入（${SLOT_PRICE_YEN.toLocaleString()}円 × ${input.slotCount}枠）。入金消込で自動的に枠が付与されます。`,
+    note: `枠購入（${SLOT_PRICE_YEN.toLocaleString()}円 × ${input.slotCount}枠）税抜${excl.toLocaleString()}円＋消費税${tax.toLocaleString()}円（${taxPct}%）＝税込${total.toLocaleString()}円。入金消込で自動的に枠が付与されます。`,
   } as never)
   if (error) throw new Error(error.message)
 }

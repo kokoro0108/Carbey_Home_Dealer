@@ -611,7 +611,7 @@ export default async function MemberDetailPage({
               <input type="hidden" name="member_id" value={member.id} />
               <div className="mb-2 flex items-center gap-2">
                 <span className="text-sm font-semibold text-slate-900">販売可能枠を購入</span>
-                <span className="text-xs text-slate-500">1枠=100,000円／保有 {currentSlots} 枠・上限10枠（3枠目以降が購入対象）</span>
+                <span className="text-xs text-slate-500">1枠=税抜100,000円＋消費税{mgmtFee.taxPct}%（税込{(100000 + Math.floor(100000 * mgmtFee.taxPct / 100)).toLocaleString()}円）／保有 {currentSlots} 枠・上限10枠（3枠目以降が購入対象）</span>
               </div>
               <div className="flex flex-wrap items-end gap-3">
                 <div>
