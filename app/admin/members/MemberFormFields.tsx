@@ -65,6 +65,38 @@ export default function MemberFormFields({
         </div>
       </section>
 
+      {/* 出金（引き出し）の振込先。申請時はこの口座が使われる（migration 044） */}
+      <section className="rounded-xl border border-slate-200 bg-white p-5">
+        <h2 className="mb-1 text-sm font-semibold text-slate-900">振込先口座（出金用）</h2>
+        <p className="mb-4 text-xs text-slate-500">出金申請時にこの口座が使用されます。未登録の場合、加盟店は出金申請できません。</p>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label className={label}>金融機関名</label>
+            <input name="bank_name" defaultValue={member?.bank_name ?? ''} placeholder="○○銀行" className={field} />
+          </div>
+          <div>
+            <label className={label}>支店名</label>
+            <input name="bank_branch" defaultValue={member?.bank_branch ?? ''} placeholder="○○支店" className={field} />
+          </div>
+          <div>
+            <label className={label}>口座種別</label>
+            <select name="bank_account_type" defaultValue={member?.bank_account_type ?? ''} className={field}>
+              <option value="">選択</option>
+              <option value="普通">普通</option>
+              <option value="当座">当座</option>
+            </select>
+          </div>
+          <div>
+            <label className={label}>口座番号</label>
+            <input name="bank_account_number" defaultValue={member?.bank_account_number ?? ''} placeholder="1234567" className={field} />
+          </div>
+          <div className="sm:col-span-2">
+            <label className={label}>口座名義（カナ）</label>
+            <input name="bank_account_holder" defaultValue={member?.bank_account_holder ?? ''} placeholder="カ）カーベイ" className={field} />
+          </div>
+        </div>
+      </section>
+
       <section className="rounded-xl border border-slate-200 bg-white p-5">
         <h2 className="mb-4 text-sm font-semibold text-slate-900">契約情報</h2>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -151,6 +183,20 @@ export default function MemberFormFields({
             </span>
           </span>
         </label>
+
+        {/* ⑦ 自動売買の枠：保有枠数・1枠あたり運用資金（本部が加盟者ごとに設定） */}
+        <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label className={label}>自動売買 保有枠数<span className="ml-1 text-xs font-normal text-slate-400">（最大10）</span></label>
+            <input name="auto_slots" type="number" min="0" max="10" defaultValue={member ? member.auto_slots : 0} className={field} />
+            <p className="mt-1 text-xs text-slate-500">プラン既定＋購入分＋本部調整。同時に運用できる車両数の上限。</p>
+          </div>
+          <div>
+            <label className={label}>1枠あたり運用資金 (円)</label>
+            <input name="capital_per_slot_yen" type="number" min="0" step="100000" defaultValue={member ? member.capital_per_slot_yen : 4000000} className={field} />
+            <p className="mt-1 text-xs text-slate-500">既定400万。預かり金でまかなえる枠数の判定に使用（不足分は受注不可）。</p>
+          </div>
+        </div>
       </section>
 
       <section className="rounded-xl border border-slate-200 bg-white p-5">

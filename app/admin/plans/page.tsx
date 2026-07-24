@@ -83,6 +83,15 @@ export default async function PlansPage({
                 <label className="mb-1 block text-xs text-slate-500">表示順</label>
                 <input name="display_order" type="number" defaultValue={p.display_order} className={field} />
               </div>
+              {/* ⑦ 自動売買：初期枠数・月額管理手数料 */}
+              <div>
+                <label className="mb-1 block text-xs text-slate-500">自動売買 初期枠数</label>
+                <input name="default_auto_slots" type="number" min="0" max="10" defaultValue={p.default_auto_slots} className={field} />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-slate-500">月額管理手数料 (円)</label>
+                <input name="mgmt_fee_monthly_yen" type="number" min="0" defaultValue={p.mgmt_fee_monthly_yen} className={field} />
+              </div>
               {/* ⑫ 利用できる運用方式：半自動・全自動をそれぞれ独立に割り当てる（両方可）。
                      plan_type はこの選択から自動導出するため、hidden で持ち回らない。 */}
               <div className="sm:col-span-4">

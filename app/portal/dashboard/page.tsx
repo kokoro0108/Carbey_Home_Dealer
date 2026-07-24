@@ -3,7 +3,7 @@ import Link from 'next/link'
 import {
   CheckCircle2, Loader2, Car, ClipboardPlus, Search, FileBarChart,
   MessageSquare, ChevronRight, Bot, Hand, ArrowRight, Clock, Sparkles,
-  Package, Wrench, Truck,
+  Package, Wrench, Truck, SlidersHorizontal,
 } from 'lucide-react'
 import { requireMember } from '@/lib/auth/session'
 import { getMemberByUserId } from '@/lib/portal/members'
@@ -13,6 +13,11 @@ import { listOwnOrders } from '@/lib/portal/orders'
 import { getDealBoardSummary, listOwnActiveDeals, DEAL_STAGE_LABEL } from '@/lib/portal/deals'
 import { listAnnouncements } from '@/lib/portal/announcements'
 import { listInvoices, INVOICE_KIND_LABEL, INVOICE_STATUS_LABEL } from '@/lib/portal/billing'
+import { getMonthlyReport } from '@/lib/portal/sales'
+import { getOwnAutoCapacity, getMemberWaitingPosition } from '@/lib/portal/auto-trading'
+import { getOwnFlowBudgets } from '@/lib/portal/budget'
+import ReserveButton from '@/components/portal-dark/ReserveButton'
+import BudgetAllocator from '@/components/portal-dark/BudgetAllocator'
 import { yen } from '@/lib/portal/labels'
 import { DarkCard, DarkCardHeader, DarkCardBody, DarkStat } from '@/components/portal-dark/DarkUI'
 import { DarkProgressRing } from '@/components/portal-dark/DarkCharts'
@@ -23,7 +28,7 @@ export const dynamic = 'force-dynamic'
 export default async function MemberDashboardPage() {
   const session = await requireMember()
   const member = await getMemberByUserId(session.userId)
-  const [onboarding, orders, announcements, flowInfo, dealSummary, activeDeals, invoices] = await Promise.all([
+  const [onboarding, orders, announcements, flowInfo, dealSummary, activeDeals, invoices, salesReport] = await Promise.all([
     getOwnOnboarding(session.userId),
     listOwnOrders(session.userId),
     listAnnouncements(true, 5),
@@ -31,7 +36,13 @@ export default async function MemberDashboardPage() {
     getDealBoardSummary(session.userId),
     listOwnActiveDeals(session.userId),
     member ? listInvoices(member.id) : Promise.resolve([]),
+    member ? getMonthlyReport(member.id) : Promise.resolve(null),
   ])
+  const autoCapacity = await getOwnAutoCapacity(session.userId) // 自動売買権限が無ければ null
+  const flowBudgets = await getOwnFlowBudgets(session.userId) // 予算振り分け（両フロー保有者のみUI表示）
+  const waitingPos = member && autoCapacity ? await getMemberWaitingPosition(member.id) : null // 受注待ちの順番（無ければ null）
+  // 受注不可の理由が「全体上限のみ」（枠・資金はOK）なら予約導線を出す
+  const canReserve = !!autoCapacity && !autoCapacity.canAccept && !autoCapacity.depositLocked && autoCapacity.availableSlots > 0 && autoCapacity.globalAvailable <= 0
 
   // 請求サマリ（PAY-03：消込結果が加盟店側に反映）。未収・遅延・未払いの請求のみ表示。
   const openInvoices = invoices.filter((inv) => inv.status === 'billed' || inv.status === 'partial' || inv.status === 'overdue')
@@ -40,6 +51,7 @@ export default async function MemberDashboardPage() {
 
   const name = member?.member_name ?? session.name ?? 'ゲスト'
   const flow = flowInfo?.flow ?? null // 'auto' | 'semi' | null(プラン未割当)
+  const fmtMan = (v: number) => `${Math.round(v / 10000)}万`
   const nextAction = onboarding ? getNextAction(onboarding) : null // ㉜ 次にやること
   const obPct = onboarding?.pct ?? 0
   const remainingSteps = onboarding ? onboarding.steps.filter((s) => s.status !== 'done').length : 0
@@ -187,6 +199,73 @@ export default async function MemberDashboardPage() {
         <DarkStat label="対応中オーダー" value={orderCounts.in_progress} unit="件" sub="本部が対応中" />
         <DarkStat label="完了オーダー" value={orderCounts.completed} unit="件" sub="納品済み" />
       </div>
+
+      {/* ===== 利益状況（Phase 3・要件5.4：販売件数サマリー／利益状況） ===== */}
+      {salesReport && (
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <DarkStat label="今月の売上" value={fmtMan(salesReport.monthRevenueYen)} unit="円" sub={`${salesReport.monthCount}台`} />
+          <DarkStat label="今月の粗利益" value={fmtMan(salesReport.monthProfitYen)} unit="円" />
+          <DarkStat label="累計粗利益" value={fmtMan(salesReport.totalProfitYen)} unit="円" sub={`累計${salesReport.totalCount}台`} />
+          <div className="flex items-center justify-center rounded-2xl border border-carbon-700 bg-carbon-900/40">
+            <Link href="/portal/reports" className="flex items-center gap-1 text-sm font-medium text-brand-400 hover:underline">
+              販売レポートを見る <ChevronRight className="h-4 w-4" />
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {/* ===== 自動売買 枠・受注状況（自動売買権限がある加盟者のみ・⑦フェーズ3） ===== */}
+      {autoCapacity && (
+        <div className="rounded-2xl border border-carbon-700 bg-carbon-900/60 p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-white">
+              <Package className="h-4 w-4 text-brand-400" /> 自動売買の枠・受注状況
+            </h2>
+            <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${autoCapacity.canAccept ? 'bg-brand-500/20 text-brand-300' : 'bg-carbon-700 text-slate-400'}`}>
+              {autoCapacity.canAccept ? '受注可能' : '受注不可'}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="rounded-xl border border-carbon-700 bg-carbon-800/40 p-3 text-center">
+              <div className="text-2xl font-bold text-white">{autoCapacity.effectiveSlots}</div>
+              <div className="text-[11px] text-slate-400">有効枠（保有{autoCapacity.ownedSlots}）</div>
+            </div>
+            <div className="rounded-xl border border-carbon-700 bg-carbon-800/40 p-3 text-center">
+              <div className="text-2xl font-bold text-white">{autoCapacity.activeCount}</div>
+              <div className="text-[11px] text-slate-400">稼働中</div>
+            </div>
+            <div className="rounded-xl border border-carbon-700 bg-carbon-800/40 p-3 text-center">
+              <div className="text-2xl font-bold text-brand-300">{autoCapacity.availableSlots}</div>
+              <div className="text-[11px] text-slate-400">空き枠</div>
+            </div>
+            <div className="rounded-xl border border-carbon-700 bg-carbon-800/40 p-3 text-center">
+              <div className="text-2xl font-bold text-white">{autoCapacity.globalAvailable}</div>
+              <div className="text-[11px] text-slate-400">全体の空き（/{autoCapacity.globalTotal}台）</div>
+            </div>
+          </div>
+          {!autoCapacity.canAccept && autoCapacity.blockReason && (
+            <p className="mt-2 text-xs text-amber-300">{autoCapacity.blockReason}</p>
+          )}
+          {/* 受注待ち（予約）：順番表示 or 申込ボタン */}
+          {waitingPos ? (
+            <div className="mt-3 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-300">
+              <Clock className="h-4 w-4" /> 受注待ちに登録済みです（現在 <span className="font-bold">{waitingPos.position}</span> 番目 / 全 {waitingPos.total} 件）。空き枠が出次第、本部からご案内します。
+            </div>
+          ) : canReserve ? (
+            <ReserveButton />
+          ) : null}
+        </div>
+      )}
+
+      {/* ===== 予算振り分け（自動売買・半自動の両方を保有する加盟者のみ・⑦フェーズ7） ===== */}
+      {flowBudgets?.isDual && (
+        <div className="rounded-2xl border border-carbon-700 bg-carbon-900/60 p-5">
+          <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
+            <SlidersHorizontal className="h-4 w-4 text-brand-400" /> 予算の振り分け
+          </h2>
+          <BudgetAllocator balance={flowBudgets.balance} autoBudget={flowBudgets.autoBudget} hasAllocation={flowBudgets.hasAllocation} />
+        </div>
+      )}
 
       {/* ===== オンボーディング進捗 + お知らせ ===== */}
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">

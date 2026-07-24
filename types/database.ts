@@ -23,6 +23,10 @@ export type PlanRow = {
   /** 自動売買モデルを保有するか（レビュー⑳） */
   has_auto: boolean
   monthly_fee_yen: number
+  /** 自動売買の初期枠数（⑦・migration 036）。economy=1, 上位=2, 半自動=0 */
+  default_auto_slots: number
+  /** 自動売買の月額管理手数料（⑦・migration 036）。上位プランで設定 */
+  mgmt_fee_monthly_yen: number
   joining_fee_yen: number
   display_order: number
   description: string | null
@@ -38,6 +42,8 @@ export type PlanInsert = {
   has_semi?: boolean
   has_auto?: boolean
   monthly_fee_yen?: number
+  default_auto_slots?: number
+  mgmt_fee_monthly_yen?: number
   joining_fee_yen?: number
   display_order?: number
   description?: string | null
@@ -78,6 +84,20 @@ export type MemberRow = {
   grant_auto: boolean
   /** オンボーディング未完了でも取引を許可する特例（本部の手動付与・レビュー㉕） */
   trading_override: boolean
+  /** 自動売買の保有枠数（⑦・migration 036）。最大10 */
+  auto_slots: number
+  /** 1枠あたり必要運用資金（⑦・migration 036）。既定400万・本部が加盟者ごと設定可 */
+  capital_per_slot_yen: number
+  /** 月額管理手数料の起算日＝枠取得日（migration 043）。NULL=初回課金時に当日で起算 */
+  mgmt_fee_anchor: string | null
+  /** 月額管理手数料の課金済み満了月数（migration 043・二重課金防止） */
+  mgmt_fee_billed_months: number
+  // 出金の振込先（migration 044）
+  bank_name: string | null
+  bank_branch: string | null
+  bank_account_type: string | null
+  bank_account_number: string | null
+  bank_account_holder: string | null
   joining_fee_yen: number | null
   monthly_fee_yen: number | null
   working_capital_yen: number | null
@@ -108,6 +128,15 @@ export type MemberInsert = {
   grant_semi?: boolean
   grant_auto?: boolean
   trading_override?: boolean
+  auto_slots?: number
+  capital_per_slot_yen?: number
+  mgmt_fee_anchor?: string | null
+  mgmt_fee_billed_months?: number
+  bank_name?: string | null
+  bank_branch?: string | null
+  bank_account_type?: string | null
+  bank_account_number?: string | null
+  bank_account_holder?: string | null
   joining_fee_yen?: number | null
   monthly_fee_yen?: number | null
   working_capital_yen?: number | null
@@ -144,6 +173,10 @@ export type InvoiceRow = {
   status: InvoiceStatus
   billed_at: string | null
   note: string | null
+  /** 枠購入の枠数（kind=slot_fee・⑦フェーズ5・migration 039） */
+  slot_count: number | null
+  /** 枠加算済みフラグ（二重加算防止・migration 039） */
+  slots_applied: boolean
   created_at: string
   updated_at: string
 }
@@ -354,7 +387,7 @@ export type EvidenceRow = {
 }
 
 // 半自動売買フェーズ1: 預かり金台帳（仕入れ資金）
-export type LedgerEntryKind = 'deposit' | 'withdraw' | 'settlement' | 'adjust'
+export type LedgerEntryKind = 'deposit' | 'withdraw' | 'settlement' | 'adjust' | 'mgmt_fee'
 
 export type MemberLedgerRow = {
   id: string
@@ -376,12 +409,14 @@ export type LedgerEntryRow = {
 }
 
 // 半自動売買フェーズ3: 車両案件ライフサイクル
-export type DealStatusStage = 'ordered' | 'sourcing' | 'prepping' | 'delivered'
+export type DealStatusStage = 'ordered' | 'sourcing' | 'prepping' | 'listing' | 'delivered' | 'sold'
 
 export type VehicleDealRow = {
   id: string
   member_id: string
   order_id: string | null
+  /** フロー種別（⑦・migration 037）。semi=半自動 / auto=自動売買（200台キャパ・枠の対象） */
+  flow: 'semi' | 'auto'
   status: DealStatusStage
   maker: string | null
   car_model: string | null
@@ -397,6 +432,28 @@ export type VehicleDealRow = {
   settled: boolean
   settled_amount_yen: number | null
   remaining_yen: number | null
+  // Phase 3 販売実績（migration 035）
+  listed_at: string | null
+  sale_price_yen: number | null
+  sold_at: string | null
+  sold_by: string | null
+  cost_total_yen: number | null
+  gross_profit_yen: number | null // 自動算出（販売価格−費用合計）
+  // フェーズ6 月額管理手数料（自動売買・migration 040）
+  mgmt_fee_yen: number | null // 清算時に預かり金から差し引いた管理手数料。NULL=未課金
+  mgmt_fee_months: number | null // 算出に用いた満了月数
+  // 仕入れエビデンス（販売中に本部が添付・migration 042）
+  sourcing_evidence_path: string | null
+  sourcing_evidence_name: string | null
+  sourcing_evidence_at: string | null
+  // 結果報告書 + 商品化チェックリスト（Phase3 仕上げ・migration 046）
+  result_report_path: string | null
+  result_report_name: string | null
+  result_report_at: string | null
+  prep_inspected: boolean
+  prep_cleaned: boolean
+  prep_photographed: boolean
+  prep_listed_ready: boolean
   created_at: string
   updated_at: string
 }
@@ -478,10 +535,92 @@ export type OnboardingTaskRow = {
   updated_at: string
 }
 
+// 全体設定（⑦・migration 036）
+export type SystemSettingRow = {
+  key: string
+  value_int: number | null
+  note: string | null
+  updated_at: string
+}
+
+// 自動売買の受注待ち（予約・⑦・migration 038）
+export type AutoReservationStatus = 'waiting' | 'assigned' | 'cancelled'
+export type AutoReservationRow = {
+  id: string
+  member_id: string
+  status: AutoReservationStatus
+  sort_order: number
+  requested_at: string
+  assigned_at: string | null
+  note: string | null
+  created_at: string
+  updated_at: string
+}
+
+/** フェーズ7：両フロー保有者の預かり金振り分け（自動売買用／半自動用）。migration 041。 */
+export type MemberBudgetAllocRow = {
+  member_id: string
+  auto_allocated_yen: number
+  semi_allocated_yen: number
+  created_at: string
+  updated_at: string
+}
+
+/** 出金申請のステータス（migration 044）。 */
+export type WithdrawalStatus = 'requested' | 'approved' | 'paid' | 'rejected' | 'cancelled'
+
+/** 運転資金の出金申請（migration 044）。 */
+export type WithdrawalRequestRow = {
+  id: string
+  member_id: string
+  status: WithdrawalStatus
+  amount_yen: number // 申請額（預かり金から減算する額）
+  fee_yen: number    // 出金手数料
+  net_yen: number    // 実際の振込額（= amount_yen − fee_yen）
+  bank_name: string | null
+  bank_branch: string | null
+  bank_account_type: string | null
+  bank_account_number: string | null
+  bank_account_holder: string | null
+  requested_at: string
+  due_date: string | null
+  approved_at: string | null
+  approved_by: string | null
+  paid_at: string | null
+  paid_by: string | null
+  reject_reason: string | null
+  note: string | null
+  created_at: string
+  updated_at: string
+}
+
+/** 月額管理手数料の月次課金 実行履歴（migration 043）。 */
+export type MemberMgmtFeeRunRow = {
+  id: string
+  member_id: string
+  months: number
+  slots: number
+  unit_yen: number
+  gross_yen: number // 税抜
+  tax_yen: number // 消費税額
+  tax_rate_pct: number // 適用税率（％）
+  from_deposit_yen: number
+  invoiced_yen: number
+  invoice_id: string | null
+  ran_by: string | null
+  note: string | null
+  created_at: string
+}
+
 export type Database = {
   portal: {
     Tables: {
       plans: { Row: PlanRow; Insert: PlanInsert; Update: Partial<PlanInsert> }
+      system_settings: { Row: SystemSettingRow; Insert: Partial<SystemSettingRow>; Update: Partial<SystemSettingRow> }
+      auto_reservations: { Row: AutoReservationRow; Insert: Partial<AutoReservationRow>; Update: Partial<AutoReservationRow> }
+      member_budget_alloc: { Row: MemberBudgetAllocRow; Insert: Partial<MemberBudgetAllocRow>; Update: Partial<MemberBudgetAllocRow> }
+      member_mgmt_fee_runs: { Row: MemberMgmtFeeRunRow; Insert: Partial<MemberMgmtFeeRunRow>; Update: Partial<MemberMgmtFeeRunRow> }
+      withdrawal_requests: { Row: WithdrawalRequestRow; Insert: Partial<WithdrawalRequestRow>; Update: Partial<WithdrawalRequestRow> }
       users: { Row: PortalUserRow; Insert: Partial<PortalUserRow>; Update: Partial<PortalUserRow> }
       members: { Row: MemberRow; Insert: MemberInsert; Update: Partial<MemberInsert> }
       payments: { Row: PaymentRow; Insert: Partial<PaymentRow>; Update: Partial<PaymentRow> }

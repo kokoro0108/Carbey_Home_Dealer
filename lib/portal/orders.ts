@@ -2,7 +2,7 @@ import { createServiceRoleClient } from '@/lib/supabase/admin'
 import { assertTradingAllowed } from '@/lib/portal/trading'
 import { getOwnOnboarding } from '@/lib/portal/onboarding'
 import { getOwnFlow } from '@/lib/portal/flow'
-import { getLedgerBalance } from '@/lib/portal/ledger'
+import { getFlowBudgets } from '@/lib/portal/budget'
 import { createDealFromOrder } from '@/lib/portal/deals'
 import type { OrderRow, OrderStatus } from '@/types/database'
 
@@ -126,13 +126,16 @@ export async function createOwnOrder(
 
   // フェーズ2 超過オーダー制限：発注金額（予算）は預かり残高より低いこと。
   //   仕入資金を超えるオーダーを禁止（自動精算の前提）。
-  const balance = await getLedgerBalance(member.id)
+  //   フェーズ7：両フロー保有者は「半自動用」の割当額で判定（単独フローは預かり残高全額）。
+  const budgets = await getFlowBudgets(member.id)
+  const balance = budgets.semiBudget
   const orderAmount = input.budget_yen ?? 0
   if (!orderAmount || orderAmount <= 0) {
     throw new Error('予算（発注金額）を入力してください。')
   }
   if (orderAmount >= balance) {
-    throw new Error(`発注金額（${orderAmount.toLocaleString()}円）が仕入れ資金の預かり残高（${balance.toLocaleString()}円）を超えています。残高の範囲内でオーダーしてください。`)
+    const label = budgets.isDual && budgets.hasAllocation ? '半自動用の予算' : '仕入れ資金の預かり残高'
+    throw new Error(`発注金額（${orderAmount.toLocaleString()}円）が${label}（${balance.toLocaleString()}円）を超えています。残高の範囲内でオーダーしてください。`)
   }
 
   const { data, error } = await supabase

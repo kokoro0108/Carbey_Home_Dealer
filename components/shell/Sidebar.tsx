@@ -20,6 +20,7 @@ import {
   Megaphone,
   Settings,
   LifeBuoy,
+  Gauge,
   AlertTriangle,
   ChevronDown,
   Menu,
@@ -58,6 +59,7 @@ const ICONS = {
   announcement: Megaphone,
   settings: Settings,
   support: LifeBuoy,
+  gauge: Gauge,
 }
 
 function NavLink({ entry, active }: { entry: NavEntry; active: boolean }) {

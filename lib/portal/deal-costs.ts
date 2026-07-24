@@ -95,6 +95,114 @@ export async function deleteDealCost(id: string): Promise<void> {
 }
 
 /**
+ * 仕入れエビデンス（販売中に本部が添付）を設定する。1案件1ファイル。
+ * 既存の添付があれば差し替え（旧ファイルはストレージから削除）。
+ */
+export async function setDealSourcingEvidence(dealId: string, file: { buffer: Buffer; name: string; type: string }): Promise<void> {
+  const supabase = createServiceRoleClient()
+  const { data: deal } = await supabase.from('vehicle_deals').select('sourcing_evidence_path').eq('id', dealId).maybeSingle<{ sourcing_evidence_path: string | null }>()
+  if (!deal) throw new Error('案件が見つかりません')
+  const path = await uploadDealEvidence(dealId, file)
+  const { error } = await supabase
+    .from('vehicle_deals')
+    .update({ sourcing_evidence_path: path, sourcing_evidence_name: file.name, sourcing_evidence_at: new Date().toISOString() } as never)
+    .eq('id', dealId)
+  if (error) {
+    await supabase.storage.from(BUCKET).remove([path])
+    throw new Error(error.message)
+  }
+  if (deal.sourcing_evidence_path) await supabase.storage.from(BUCKET).remove([deal.sourcing_evidence_path])
+}
+
+/** 仕入れエビデンスを削除する（ストレージ実体＋列をクリア）。 */
+export async function clearDealSourcingEvidence(dealId: string): Promise<void> {
+  const supabase = createServiceRoleClient()
+  const { data: deal } = await supabase.from('vehicle_deals').select('sourcing_evidence_path').eq('id', dealId).maybeSingle<{ sourcing_evidence_path: string | null }>()
+  if (deal?.sourcing_evidence_path) await supabase.storage.from(BUCKET).remove([deal.sourcing_evidence_path])
+  const { error } = await supabase
+    .from('vehicle_deals')
+    .update({ sourcing_evidence_path: null, sourcing_evidence_name: null, sourcing_evidence_at: null } as never)
+    .eq('id', dealId)
+  if (error) throw new Error(error.message)
+}
+
+/** 結果報告書（販売結果報告時に添付・D&D）を設定する。1案件1ファイル。 */
+export async function setDealResultReport(dealId: string, file: { buffer: Buffer; name: string; type: string }): Promise<void> {
+  const supabase = createServiceRoleClient()
+  const { data: deal } = await supabase.from('vehicle_deals').select('result_report_path').eq('id', dealId).maybeSingle<{ result_report_path: string | null }>()
+  if (!deal) throw new Error('案件が見つかりません')
+  const path = await uploadDealEvidence(dealId, file)
+  const { error } = await supabase
+    .from('vehicle_deals')
+    .update({ result_report_path: path, result_report_name: file.name, result_report_at: new Date().toISOString() } as never)
+    .eq('id', dealId)
+  if (error) {
+    await supabase.storage.from(BUCKET).remove([path])
+    throw new Error(error.message)
+  }
+  if (deal.result_report_path) await supabase.storage.from(BUCKET).remove([deal.result_report_path])
+}
+
+/** 結果報告書を削除する。 */
+export async function clearDealResultReport(dealId: string): Promise<void> {
+  const supabase = createServiceRoleClient()
+  const { data: deal } = await supabase.from('vehicle_deals').select('result_report_path').eq('id', dealId).maybeSingle<{ result_report_path: string | null }>()
+  if (deal?.result_report_path) await supabase.storage.from(BUCKET).remove([deal.result_report_path])
+  const { error } = await supabase
+    .from('vehicle_deals')
+    .update({ result_report_path: null, result_report_name: null, result_report_at: null } as never)
+    .eq('id', dealId)
+  if (error) throw new Error(error.message)
+}
+
+/** 結果報告書を閲覧者の権限で取得（プロキシ用）。本部は全件、加盟店は自分の案件のみ。 */
+export async function getDealResultReportForViewer(
+  dealId: string,
+  viewer: { userId: string; isStaff: boolean },
+): Promise<{ data: Blob; name: string; type: string } | null> {
+  const supabase = createServiceRoleClient()
+  const { data: deal } = await supabase
+    .from('vehicle_deals')
+    .select('member_id, result_report_path, result_report_name')
+    .eq('id', dealId)
+    .maybeSingle<{ member_id: string; result_report_path: string | null; result_report_name: string | null }>()
+  if (!deal?.result_report_path) return null
+  if (!viewer.isStaff) {
+    const { data: member } = await supabase.from('members').select('id').eq('user_id', viewer.userId).maybeSingle<{ id: string }>()
+    if (!member || member.id !== deal.member_id) return null
+  }
+  const { data: blob, error } = await supabase.storage.from(BUCKET).download(deal.result_report_path)
+  if (error || !blob) return null
+  return { data: blob, name: deal.result_report_name ?? 'report', type: blob.type || 'application/octet-stream' }
+}
+
+/**
+ * 仕入れエビデンスを閲覧者の権限で取得（プロキシ用）。
+ * 本部は全件、加盟店は自分の案件のみ。署名URLは露出しない。
+ */
+export async function getDealSourcingEvidenceForViewer(
+  dealId: string,
+  viewer: { userId: string; isStaff: boolean },
+): Promise<{ data: Blob; name: string; type: string } | null> {
+  const supabase = createServiceRoleClient()
+  const { data: deal } = await supabase
+    .from('vehicle_deals')
+    .select('member_id, sourcing_evidence_path, sourcing_evidence_name')
+    .eq('id', dealId)
+    .maybeSingle<{ member_id: string; sourcing_evidence_path: string | null; sourcing_evidence_name: string | null }>()
+  if (!deal?.sourcing_evidence_path) return null
+
+  if (!viewer.isStaff) {
+    const { data: member } = await supabase.from('members').select('id').eq('user_id', viewer.userId).maybeSingle<{ id: string }>()
+    if (!member || member.id !== deal.member_id) return null
+  }
+
+  const { data: blob, error } = await supabase.storage.from(BUCKET).download(deal.sourcing_evidence_path)
+  if (error || !blob) return null
+  return { data: blob, name: deal.sourcing_evidence_name ?? 'evidence', type: blob.type || 'application/octet-stream' }
+}
+
+/**
  * エビデンスを閲覧者の権限で取得（プロキシ用）。
  * 本部は全件、加盟店は自分の案件のみ。署名URLは露出しない。
  */

@@ -6,7 +6,7 @@ import type { MemberRow, MemberInsert, PaymentRow, PlanRow } from '@/types/datab
  * 呼び出し側で requireStaff 済みであること (service-role は RLS バイパス)。
  */
 
-export type MemberWithPlan = MemberRow & { plan: Pick<PlanRow, 'code' | 'name'> | null }
+export type MemberWithPlan = MemberRow & { plan: Pick<PlanRow, 'code' | 'name' | 'default_auto_slots'> | null }
 
 export type MemberFilter = {
   q?: string // name/email/company 部分一致
@@ -18,7 +18,7 @@ export async function listMembers(filter: MemberFilter = {}): Promise<MemberWith
   const supabase = createServiceRoleClient()
   let query = supabase
     .from('members')
-    .select('*, plan:plans(code, name)')
+    .select('*, plan:plans(code, name, default_auto_slots)')
     .order('created_at', { ascending: false })
 
   if (filter.status) query = query.eq('status', filter.status)
@@ -37,7 +37,7 @@ export async function getMember(id: string): Promise<MemberWithPlan | null> {
   const supabase = createServiceRoleClient()
   const { data, error } = await supabase
     .from('members')
-    .select('*, plan:plans(code, name)')
+    .select('*, plan:plans(code, name, default_auto_slots)')
     .eq('id', id)
     .maybeSingle()
   if (error) throw new Error(error.message)
@@ -103,7 +103,7 @@ export async function getMemberByUserId(userId: string): Promise<MemberWithPlan 
   const supabase = createServiceRoleClient()
   const { data, error } = await supabase
     .from('members')
-    .select('*, plan:plans(code, name)')
+    .select('*, plan:plans(code, name, default_auto_slots)')
     .eq('user_id', userId)
     .maybeSingle()
   if (error) throw new Error(error.message)

@@ -82,6 +82,17 @@ export default async function NewPlanPage({
             <input name="display_order" type="number" defaultValue="0" className={field} />
           </div>
         </div>
+        {/* ⑦ 自動売買：初期枠数・月額管理手数料 */}
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className={label}>自動売買 初期枠数</label>
+            <input name="default_auto_slots" type="number" min="0" max="10" defaultValue="0" className={field} />
+          </div>
+          <div>
+            <label className={label}>月額管理手数料 (円)</label>
+            <input name="mgmt_fee_monthly_yen" type="number" min="0" defaultValue="0" className={field} />
+          </div>
+        </div>
         <div>
           <label className={label}>説明</label>
           <input name="description" className={field} />

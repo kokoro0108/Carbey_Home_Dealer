@@ -9,6 +9,8 @@ import { getFunding, LOAN_STEPS } from '@/lib/portal/funding'
 import { getMemberOrderSummary } from '@/lib/portal/orders'
 import { getMemberCapabilities } from '@/lib/portal/capabilities'
 import { getLedgerBalance, listLedgerEntries } from '@/lib/portal/ledger'
+import { getMemberDealSummary, DEAL_STAGE_LABEL } from '@/lib/portal/deals'
+import { getSalesSummary } from '@/lib/portal/sales'
 import { listInvoices, listInvoicePayments, INVOICE_KIND_LABEL, INVOICE_STATUS_LABEL } from '@/lib/portal/billing'
 import { listConsentLog } from '@/lib/portal/agreements'
 import { MEMBER_STATUS_LABEL, yen } from '@/lib/portal/labels'
@@ -17,7 +19,8 @@ import { updateMemberAction, issueCredentialsAction } from '../actions'
 import { reviewEvidenceAction } from '../evidence-actions'
 import { confirmSelfAction, setAdminStepAction } from '../funding-actions'
 import { addLedgerEntryAction, deleteLedgerEntryAction } from '../ledger-actions'
-import { createInvoiceAction, recordPaymentAction, markBilledAction, cancelInvoiceAction, deleteInvoiceAction } from '../billing-actions'
+import { createInvoiceAction, createSlotPurchaseAction, runMemberMgmtFeeAction, recordPaymentAction, markBilledAction, cancelInvoiceAction, deleteInvoiceAction } from '../billing-actions'
+import { getMgmtFeePreview, listMgmtFeeRuns } from '@/lib/portal/mgmt-fee'
 import MemberFormFields from '../MemberFormFields'
 
 const INVOICE_STATUS_TONE: Record<string, string> = {
@@ -34,6 +37,7 @@ const LEDGER_KIND_LABEL: Record<string, string> = {
   withdraw: '出金',
   settlement: '取引精算',
   adjust: '調整',
+  mgmt_fee: '月額管理手数料',
 }
 
 export const dynamic = 'force-dynamic'
@@ -52,9 +56,11 @@ export default async function MemberDetailPage({
     getMember(id), listPlans(false), listPayments(id), listEvidences(id),
   ])
   if (!member) notFound()
-  const [funding, consents, orderSummary, capabilities, ledgerBalance, ledgerEntries, invoices] = await Promise.all([
+  const [funding, consents, orderSummary, capabilities, ledgerBalance, ledgerEntries, invoices, dealSummary, memberSales, mgmtFee, mgmtFeeRuns] = await Promise.all([
     getFunding(member.id), listConsentLog(member.id), getMemberOrderSummary(member.id), getMemberCapabilities(member.id),
     getLedgerBalance(member.id), listLedgerEntries(member.id), listInvoices(member.id),
+    getMemberDealSummary(member.id), getSalesSummary(member.id),
+    getMgmtFeePreview(member.id), listMgmtFeeRuns(member.id),
   ])
   // 各請求の消込内訳（入金明細）
   const invoicePayments = await Promise.all(invoices.map((inv) => listInvoicePayments(inv.id)))
@@ -142,6 +148,12 @@ export default async function MemberDetailPage({
         <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
           契約ステータスを「稼働中（active）」にするには、運用方式の権限（セミオート／フルオート／両方）を1つ以上割り当ててください。
         </div>
+      )}
+      {sp.error && !['contract_date_required', 'email_duplicate', 'plan_required', 'grant_required'].includes(sp.error) && (
+        <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{sp.error}</div>
+      )}
+      {sp.msg && (
+        <div className="mb-4 rounded-lg bg-green-50 px-4 py-3 text-sm text-green-700">{sp.msg}</div>
       )}
 
       {/* ===== ログイン発行（本部が直接パスワードを発行する発行型フロー） ===== */}
@@ -283,6 +295,33 @@ export default async function MemberDetailPage({
             </div>
           </div>
         </div>
+      </div>
+
+      {/* ===== 担当車両サマリ（㉓ 全体連携：車両進捗管理と連動） ===== */}
+      <div className="mb-6 rounded-xl border border-slate-200 bg-white p-5">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+            <ShoppingCart className="h-4 w-4 text-brand-500" /> 担当車両（進捗・販売実績）
+          </h2>
+          <Link href={`/admin/vehicles?member=${member.id}`} className="flex items-center gap-0.5 text-xs font-medium text-brand-600 hover:underline">
+            車両進捗管理 <ChevronRight className="h-3 w-3" />
+          </Link>
+        </div>
+        <div className="grid grid-cols-3 gap-2 text-center sm:grid-cols-5">
+          {(['sourcing', 'prepping', 'listing', 'delivered', 'sold'] as const).map((s) => (
+            <div key={s} className="rounded-lg bg-slate-50 py-2">
+              <div className="text-lg font-bold text-slate-900">{dealSummary[s]}</div>
+              <div className="text-[10px] text-slate-500">{DEAL_STAGE_LABEL[s]}</div>
+            </div>
+          ))}
+        </div>
+        {memberSales.count > 0 && (
+          <div className="mt-3 flex flex-wrap gap-4 border-t border-slate-100 pt-3 text-xs text-slate-600">
+            <span>売上 <span className="font-semibold text-slate-900">{yen(memberSales.revenueYen)}</span></span>
+            <span>粗利益 <span className="font-semibold text-emerald-700">{yen(memberSales.profitYen)}</span></span>
+            <span>利益率 <span className="font-semibold text-slate-900">{memberSales.marginPct}%</span></span>
+          </div>
+        )}
       </div>
 
       {/* ===== 利用可能機能（権限・フロー連動で自動制御／㉕・④） ===== */}
@@ -553,6 +592,93 @@ export default async function MemberDetailPage({
             )}
           </div>
         </div>
+
+        {/* 自動売買の枠購入（3枠目以降・1枠=10万円）— 消込完了で auto_slots が自動加算（⑦フェーズ5 / 2026-07-21 改定） */}
+        {member.grant_auto && (() => {
+          const currentSlots = member.auto_slots ?? 0
+          const planDefault = member.plan?.default_auto_slots ?? 0
+          const purchasable = planDefault >= 2 // エコノミー等（既定1枠）は枠固定で追加購入不可
+          const remainingSlots = Math.max(0, 10 - currentSlots)
+          if (!purchasable) {
+            return (
+              <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-500">
+                このプランは枠数が固定（1枠）のため、追加の枠購入はできません。枠の追加は上位プラン（既定2枠・3枠目以降が購入対象）で可能です。
+              </div>
+            )
+          }
+          return (
+            <form action={createSlotPurchaseAction} className="mb-4 rounded-xl border border-brand-200 bg-brand-50/60 p-4">
+              <input type="hidden" name="member_id" value={member.id} />
+              <div className="mb-2 flex items-center gap-2">
+                <span className="text-sm font-semibold text-slate-900">販売可能枠を購入</span>
+                <span className="text-xs text-slate-500">1枠=税抜100,000円＋消費税{mgmtFee.taxPct}%（税込{(100000 + Math.floor(100000 * mgmtFee.taxPct / 100)).toLocaleString()}円）／保有 {currentSlots} 枠・上限10枠（3枠目以降が購入対象）</span>
+              </div>
+              <div className="flex flex-wrap items-end gap-3">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-600">購入枠数 *</label>
+                  <input
+                    name="slot_count"
+                    type="number"
+                    min={1}
+                    max={remainingSlots || 1}
+                    defaultValue={remainingSlots > 0 ? 1 : ''}
+                    disabled={remainingSlots === 0}
+                    className="w-28 rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-100"
+                  />
+                </div>
+                <button
+                  disabled={remainingSlots === 0}
+                  className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-50"
+                >
+                  枠購入を請求
+                </button>
+                <p className="text-xs text-slate-500">
+                  {remainingSlots === 0
+                    ? '既に上限（10枠）に達しています。'
+                    : '請求を発行し、入金消込が完了すると自動的に枠が付与されます。枠数に応じて月額管理手数料も増減します。'}
+                </p>
+              </div>
+            </form>
+          )
+        })()}
+
+        {/* 月額管理手数料（枠数連動・本部が月次で相殺／請求）— 2026-07-21 改定 */}
+        {member.grant_auto && mgmtFee.eligible && (
+          <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50/50 p-4">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <span className="text-sm font-semibold text-slate-900">月額管理手数料（月次）</span>
+              <span className="text-xs text-slate-500">
+                月額（税抜）=（枠数−1）× {yen(mgmtFee.unit)} ／ 現在 {mgmtFee.slots}枠 = <span className="font-medium text-slate-700">{yen(mgmtFee.monthlyFee)}</span>
+                ＋消費税{mgmtFee.taxPct}% {yen(mgmtFee.monthlyTax)} ＝ <span className="font-semibold text-amber-700">税込 {yen(mgmtFee.monthlyFeeIncl)}</span>/月
+              </span>
+            </div>
+            <div className="mb-3 grid grid-cols-2 gap-2 text-xs text-slate-600 sm:grid-cols-4">
+              <div>起算日<div className="font-medium text-slate-800">{mgmtFee.anchor ?? '未設定'}</div></div>
+              <div>課金済み<div className="font-medium text-slate-800">{mgmtFee.billedMonths} か月</div></div>
+              <div>今回課金可能<div className="font-medium text-slate-800">{mgmtFee.dueMonths} か月 = 税込 {yen(mgmtFee.dueGrossIncl)}<span className="ml-1 text-[10px] text-slate-400">（税抜{yen(mgmtFee.dueGross)}＋税{yen(mgmtFee.dueTax)}）</span></div></div>
+              <div>預かり金残高<div className="font-medium text-slate-800">{yen(mgmtFee.balance)}</div></div>
+            </div>
+            <form action={runMemberMgmtFeeAction} className="flex flex-wrap items-center gap-2">
+              <input type="hidden" name="member_id" value={member.id} />
+              <button className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700">今月分を相殺／請求する</button>
+              <span className="text-xs text-slate-500">満了月分を預かり金から相殺し、不足は請求（デポジット依頼）＋通知します。</span>
+            </form>
+            {mgmtFeeRuns.length > 0 && (
+              <div className="mt-3 space-y-1 border-t border-amber-100 pt-2">
+                <div className="text-[11px] font-medium text-slate-500">実行履歴</div>
+                {mgmtFeeRuns.slice(0, 6).map((r) => (
+                  <div key={r.id} className="flex flex-wrap items-center gap-x-3 text-[11px] text-slate-600">
+                    <span className="text-slate-400">{new Date(r.created_at).toLocaleDateString('ja-JP')}</span>
+                    <span>{r.months}か月・{r.slots}枠</span>
+                    <span>税込 {yen(r.gross_yen + r.tax_yen)}<span className="ml-1 text-slate-400">（税抜{yen(r.gross_yen)}＋税{yen(r.tax_yen)}）</span></span>
+                    <span className="text-green-700">預かり金 {yen(r.from_deposit_yen)}</span>
+                    {r.invoiced_yen > 0 && <span className="text-amber-700">請求 {yen(r.invoiced_yen)}</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* 請求を作成 */}
         <form action={createInvoiceAction} className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-4">

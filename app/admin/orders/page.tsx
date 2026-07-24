@@ -111,7 +111,14 @@ export default async function AdminOrdersPage({
                 const deal = deals.get(o.id)
                 return (
                   <tr key={o.id} className="hover:bg-slate-50">
-                    <td className="px-5 py-3 font-medium text-slate-700">{o.order_number ?? '—'}</td>
+                    <td className="px-5 py-3 font-medium">
+                      {/* ③ 個別詳細（車両進捗管理）へ遷移 */}
+                      {deal ? (
+                        <Link href={`/admin/vehicles/${deal.id}`} className="text-brand-600 hover:underline">{o.order_number ?? '—'}</Link>
+                      ) : (
+                        <span className="text-slate-700">{o.order_number ?? '—'}</span>
+                      )}
+                    </td>
                     <td className="px-5 py-3">
                       {o.member ? (
                         <Link href={`/admin/members/${o.member.id}`} className="text-slate-700 hover:text-brand-600 hover:underline">
@@ -119,13 +126,20 @@ export default async function AdminOrdersPage({
                         </Link>
                       ) : '—'}
                     </td>
-                    <td className="px-5 py-3 text-slate-700">{[o.maker, o.car_model, o.year].filter(Boolean).join(' ')}</td>
+                    <td className="px-5 py-3 text-slate-700">
+                      {deal ? (
+                        <Link href={`/admin/vehicles/${deal.id}`} className="hover:text-brand-600 hover:underline">{[o.maker, o.car_model, o.year].filter(Boolean).join(' ')}</Link>
+                      ) : [o.maker, o.car_model, o.year].filter(Boolean).join(' ')}
+                    </td>
                     <td className="px-5 py-3 text-slate-700">{o.budget_yen ? yen(o.budget_yen) : '—'}</td>
                     <td className="px-5 py-3 text-slate-500">{new Date(o.created_at).toLocaleDateString('ja-JP')}</td>
 
-                    {/* 半自動売買の進捗（仕入れ中 → 商品化中 → 納品完了） */}
+                    {/* 半自動売買の進捗（仕入れ中 → 商品化中 → 納品完了）＋個別詳細への導線 */}
                     <td className="px-5 py-3">
                       <DealProgress deal={deal} />
+                      {deal && (
+                        <Link href={`/admin/vehicles/${deal.id}`} className="mt-1 inline-block text-[11px] font-medium text-brand-600 hover:underline">費用・詳細 →</Link>
+                      )}
                     </td>
 
                     <td className="px-5 py-3">
