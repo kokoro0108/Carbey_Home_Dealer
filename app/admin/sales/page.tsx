@@ -28,13 +28,17 @@ export default async function AdminSalesPage() {
         <p className="text-sm text-slate-500">売却済みの車両から、売上・原価・粗利益を自動集計します。</p>
       </div>
 
-      {/* 全体サマリ（要件 5.6） */}
+      {/* 全体サマリ（要件 5.6 / CAR-04） */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
         <StatCard label="販売台数" value={`${summary.count}台`} icon={<Package className="h-4 w-4" />} tone="brand" />
         <StatCard label="売上合計" value={yen(summary.revenueYen)} icon={<TrendingUp className="h-4 w-4" />} tone="blue" />
         <StatCard label="原価合計" value={yen(summary.costYen)} icon={<TrendingUp className="h-4 w-4" />} tone="slate" />
         <StatCard label="粗利益合計" value={yen(summary.profitYen)} icon={<TrendingUp className="h-4 w-4" />} tone="green" />
         <StatCard label="利益率" value={`${summary.marginPct}%`} icon={<TrendingUp className="h-4 w-4" />} tone="green" />
+      </div>
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+        <StatCard label="平均在庫日数" value={`${summary.avgStockDays}日`} icon={<TrendingUp className="h-4 w-4" />} tone="slate" sub="仕入れ〜売却の平均" />
+        <StatCard label="回転率（年換算）" value={`${summary.turnoverRate}回`} icon={<TrendingUp className="h-4 w-4" />} tone="blue" sub="365 ÷ 平均在庫日数（目安）" />
       </div>
 
       {/* 月別推移グラフ（㉑ 縦軸目盛りつき） */}
@@ -72,12 +76,13 @@ export default async function AdminSalesPage() {
                   <th className="px-5 py-3 font-medium">売上</th>
                   <th className="px-5 py-3 font-medium">粗利益</th>
                   <th className="px-5 py-3 font-medium">利益率</th>
+                  <th className="px-5 py-3 font-medium">平均在庫日数</th>
                   <th className="px-5 py-3"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {byMember.length === 0 && (
-                  <tr><td colSpan={6} className="px-5 py-8 text-center text-slate-400">実績のある加盟店がまだありません。</td></tr>
+                  <tr><td colSpan={7} className="px-5 py-8 text-center text-slate-400">実績のある加盟店がまだありません。</td></tr>
                 )}
                 {byMember.map((m) => (
                   <tr key={m.memberId} className="hover:bg-slate-50">
@@ -86,6 +91,7 @@ export default async function AdminSalesPage() {
                     <td className="px-5 py-3 text-slate-700">{yen(m.revenueYen)}</td>
                     <td className={`px-5 py-3 font-medium ${m.profitYen >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>{yen(m.profitYen)}</td>
                     <td className="px-5 py-3 text-slate-600">{m.marginPct}%</td>
+                    <td className="px-5 py-3 text-slate-600">{m.avgStockDays}日</td>
                     <td className="px-5 py-3 text-right">
                       <Link href={`/admin/members/${m.memberId}`} className="inline-flex items-center gap-0.5 text-xs font-medium text-info-600 hover:underline">
                         詳細 <ChevronRight className="h-3 w-3" />

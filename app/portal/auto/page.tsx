@@ -43,16 +43,18 @@ function DealCard({ deal }: { deal: VehicleDealRow }) {
           <span>掲載 {fmtDate(deal.listed_at)}</span>
         </div>
       )}
-      {deal.sourcing_evidence_path && (
-        <a
-          href={`/api/portal/deal-sourcing-evidence/${deal.id}`}
-          target="_blank"
-          rel="noreferrer"
-          className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-brand-300 hover:underline"
-        >
-          <Paperclip className="h-3 w-3" /> 仕入れエビデンス
-        </a>
-      )}
+      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+        {deal.sourcing_evidence_path && (
+          <a href={`/api/portal/deal-sourcing-evidence/${deal.id}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] font-medium text-brand-300 hover:underline">
+            <Paperclip className="h-3 w-3" /> 仕入れエビデンス
+          </a>
+        )}
+        {deal.result_report_path && (
+          <a href={`/api/portal/deal-result-report/${deal.id}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-300 hover:underline">
+            <Paperclip className="h-3 w-3" /> 結果報告書
+          </a>
+        )}
+      </div>
     </div>
   )
 }

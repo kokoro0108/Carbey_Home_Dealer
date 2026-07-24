@@ -446,6 +446,14 @@ export type VehicleDealRow = {
   sourcing_evidence_path: string | null
   sourcing_evidence_name: string | null
   sourcing_evidence_at: string | null
+  // 結果報告書 + 商品化チェックリスト（Phase3 仕上げ・migration 046）
+  result_report_path: string | null
+  result_report_name: string | null
+  result_report_at: string | null
+  prep_inspected: boolean
+  prep_cleaned: boolean
+  prep_photographed: boolean
+  prep_listed_ready: boolean
   created_at: string
   updated_at: string
 }

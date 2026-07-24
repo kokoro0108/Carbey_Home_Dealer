@@ -10,6 +10,8 @@ import { Card, CardHeader, CardBody } from '@/components/ui/Card'
 import { yen } from '@/lib/portal/labels'
 import AdminDealCostEditor from '@/components/admin/AdminDealCostEditor'
 import AdminSourcingEvidence from '@/components/admin/AdminSourcingEvidence'
+import AdminResultReport from '@/components/admin/AdminResultReport'
+import AdminPrepChecklist from '@/components/admin/AdminPrepChecklist'
 import { dealToPreppingAction, dealToListingAction, recordSaleAction, settleDealAction, setDestinationAction, cancelSettlementAction } from '../actions'
 
 export const dynamic = 'force-dynamic'
@@ -92,6 +94,22 @@ export default async function AdminDealDetailPage({
                 <button className="inline-flex items-center gap-1.5 rounded-lg bg-slate-800 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-900"><Truck className="h-4 w-4" /> 費用を確定して精算（納品）</button>
               </form>
             )}
+          </CardBody>
+        </Card>
+      )}
+
+      {/* 商品化チェックリスト（点検・清掃・撮影・掲載準備・CAR-05） */}
+      {deal.status !== 'sold' && (
+        <Card>
+          <CardHeader title="商品化チェックリスト" />
+          <CardBody>
+            <AdminPrepChecklist
+              dealId={deal.id}
+              inspected={deal.prep_inspected}
+              cleaned={deal.prep_cleaned}
+              photographed={deal.prep_photographed}
+              listedReady={deal.prep_listed_ready}
+            />
           </CardBody>
         </Card>
       )}
@@ -179,12 +197,18 @@ export default async function AdminDealDetailPage({
           <CardHeader title="販売実績" />
           <CardBody>
             {deal.status === 'sold' ? (
-              <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <div><dt className="text-xs text-slate-500">販売価格</dt><dd className="font-semibold text-slate-900">{yen(deal.sale_price_yen)}</dd></div>
-                <div><dt className="text-xs text-slate-500">費用合計</dt><dd className="font-semibold text-slate-900">{yen(deal.cost_total_yen)}</dd></div>
-                <div><dt className="text-xs text-slate-500">粗利益</dt><dd className={`font-semibold ${(deal.gross_profit_yen ?? 0) >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>{yen(deal.gross_profit_yen)}</dd></div>
-                <div><dt className="text-xs text-slate-500">売却日</dt><dd className="font-semibold text-slate-900">{deal.sold_at ? new Date(deal.sold_at).toLocaleDateString('ja-JP') : '—'}</dd></div>
-              </dl>
+              <>
+                <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <div><dt className="text-xs text-slate-500">販売価格</dt><dd className="font-semibold text-slate-900">{yen(deal.sale_price_yen)}</dd></div>
+                  <div><dt className="text-xs text-slate-500">費用合計</dt><dd className="font-semibold text-slate-900">{yen(deal.cost_total_yen)}</dd></div>
+                  <div><dt className="text-xs text-slate-500">粗利益</dt><dd className={`font-semibold ${(deal.gross_profit_yen ?? 0) >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>{yen(deal.gross_profit_yen)}</dd></div>
+                  <div><dt className="text-xs text-slate-500">売却日</dt><dd className="font-semibold text-slate-900">{deal.sold_at ? new Date(deal.sold_at).toLocaleDateString('ja-JP') : '—'}</dd></div>
+                </dl>
+                <div className="mt-4 border-t border-slate-100 pt-3">
+                  <p className="mb-2 text-xs font-medium text-slate-600">結果報告書（販売結果の報告書を添付／加盟店も閲覧できます）</p>
+                  <AdminResultReport dealId={deal.id} reportName={deal.result_report_name} reportAt={deal.result_report_at} />
+                </div>
+              </>
             ) : (
               <>
                 <form action={recordSaleAction} className="flex flex-wrap items-end gap-2">

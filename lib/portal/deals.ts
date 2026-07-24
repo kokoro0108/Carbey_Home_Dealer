@@ -179,6 +179,22 @@ export async function listActiveDeals(memberId: string): Promise<VehicleDealRow[
   return (data ?? []) as unknown as VehicleDealRow[]
 }
 
+/** 商品化チェックリスト（点検・清掃・撮影・掲載準備）を更新する（本部・CAR-05）。 */
+export async function setPrepChecklist(
+  dealId: string,
+  patch: { inspected?: boolean; cleaned?: boolean; photographed?: boolean; listedReady?: boolean },
+): Promise<void> {
+  const supabase = createServiceRoleClient()
+  const update: Record<string, boolean> = {}
+  if (patch.inspected !== undefined) update.prep_inspected = patch.inspected
+  if (patch.cleaned !== undefined) update.prep_cleaned = patch.cleaned
+  if (patch.photographed !== undefined) update.prep_photographed = patch.photographed
+  if (patch.listedReady !== undefined) update.prep_listed_ready = patch.listedReady
+  if (Object.keys(update).length === 0) return
+  const { error } = await supabase.from('vehicle_deals').update(update as never).eq('id', dealId)
+  if (error) throw new Error(error.message)
+}
+
 /** フェーズ8：加盟者の全自動（flow='auto'）案件を新しい順に取得（進捗フロー表示用）。 */
 export async function listMemberAutoDeals(memberId: string): Promise<VehicleDealRow[]> {
   const supabase = createServiceRoleClient()

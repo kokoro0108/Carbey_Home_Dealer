@@ -3,8 +3,8 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { requireFeature } from '@/lib/auth/session'
-import { createManualDeal, moveToPrepping, moveToListing, recordSale, settleAndDeliver, cancelSettlement, setDealDestination, DEFAULT_FROM_PREF } from '@/lib/portal/deals'
-import { addDealCost, updateDealCost, deleteDealCost, uploadDealEvidence, setDealSourcingEvidence, clearDealSourcingEvidence } from '@/lib/portal/deal-costs'
+import { createManualDeal, moveToPrepping, moveToListing, recordSale, settleAndDeliver, cancelSettlement, setDealDestination, setPrepChecklist, DEFAULT_FROM_PREF } from '@/lib/portal/deals'
+import { addDealCost, updateDealCost, deleteDealCost, uploadDealEvidence, setDealSourcingEvidence, clearDealSourcingEvidence, setDealResultReport, clearDealResultReport } from '@/lib/portal/deal-costs'
 import { isPrefecture } from '@/lib/portal/prefectures'
 import type { DealCostKind } from '@/types/database'
 
@@ -168,6 +168,58 @@ export async function removeDealSourcingEvidenceAction(formData: FormData): Prom
     return { ok: true }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : '削除に失敗しました' }
+  }
+}
+
+/** 結果報告書を添付/差し替え（本部・D&D・画像/PDF）。 */
+export async function uploadDealResultReportAction(formData: FormData): Promise<{ ok: boolean; error?: string }> {
+  await requireFeature('reports')
+  const dealId = String(formData.get('deal_id') ?? '')
+  if (!dealId) return { ok: false, error: '対象がありません' }
+  const file = formData.get('report')
+  if (!(file instanceof File) || file.size === 0) return { ok: false, error: 'ファイルを選択してください' }
+  if (file.size > ATTACH_MAX) return { ok: false, error: 'ファイルは20MBまでです' }
+  if (!EVIDENCE_TYPES.test(file.type)) return { ok: false, error: '画像またはPDFを添付してください' }
+  try {
+    const buffer = Buffer.from(await file.arrayBuffer())
+    await setDealResultReport(dealId, { buffer, name: file.name, type: file.type || 'application/octet-stream' })
+    revalidateDeal(dealId)
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : '添付に失敗しました' }
+  }
+}
+
+/** 結果報告書を削除（本部）。 */
+export async function removeDealResultReportAction(formData: FormData): Promise<{ ok: boolean; error?: string }> {
+  await requireFeature('reports')
+  const dealId = String(formData.get('deal_id') ?? '')
+  if (!dealId) return { ok: false, error: '対象がありません' }
+  try {
+    await clearDealResultReport(dealId)
+    revalidateDeal(dealId)
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : '削除に失敗しました' }
+  }
+}
+
+/** 商品化チェックリストの1項目を切り替える（本部）。 */
+export async function togglePrepChecklistAction(formData: FormData): Promise<{ ok: boolean; error?: string }> {
+  await requireFeature('reports')
+  const dealId = String(formData.get('deal_id') ?? '')
+  const key = String(formData.get('key') ?? '')
+  const value = String(formData.get('value') ?? '') === 'true'
+  const map: Record<string, 'inspected' | 'cleaned' | 'photographed' | 'listedReady'> = {
+    inspected: 'inspected', cleaned: 'cleaned', photographed: 'photographed', listedReady: 'listedReady',
+  }
+  if (!dealId || !map[key]) return { ok: false, error: '対象がありません' }
+  try {
+    await setPrepChecklist(dealId, { [map[key]]: value })
+    revalidateDeal(dealId)
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : '更新に失敗しました' }
   }
 }
 

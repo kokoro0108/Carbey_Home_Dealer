@@ -13,6 +13,8 @@ export type SalesSummary = {
   costYen: number       // 原価合計（費用合計）
   profitYen: number     // 粗利益合計
   marginPct: number     // 利益率（粗利益 ÷ 売上 × 100）
+  avgStockDays: number  // 平均在庫日数（仕入れ〜売却の平均日数）
+  turnoverRate: number  // 年換算回転率（目安・365 ÷ 平均在庫日数）
 }
 
 export type MonthlySales = {
@@ -34,12 +36,24 @@ async function listSold(memberId?: string): Promise<VehicleDealRow[]> {
   return (data ?? []) as unknown as VehicleDealRow[]
 }
 
+/** 在庫日数（仕入れ日〜売却日）。仕入れ日=sourcing_at、無ければ ordered_at。両端が揃う案件のみ。 */
+function stockDays(d: VehicleDealRow): number | null {
+  const start = d.sourcing_at ?? d.ordered_at
+  if (!start || !d.sold_at) return null
+  const ms = new Date(d.sold_at).getTime() - new Date(start).getTime()
+  if (!Number.isFinite(ms) || ms < 0) return null
+  return ms / 86_400_000
+}
+
 function summarize(deals: VehicleDealRow[]): SalesSummary {
   const revenueYen = deals.reduce((s, d) => s + (d.sale_price_yen ?? 0), 0)
   const costYen = deals.reduce((s, d) => s + (d.cost_total_yen ?? 0), 0)
   const profitYen = deals.reduce((s, d) => s + (d.gross_profit_yen ?? 0), 0)
   const marginPct = revenueYen > 0 ? Math.round((profitYen / revenueYen) * 1000) / 10 : 0
-  return { count: deals.length, revenueYen, costYen, profitYen, marginPct }
+  const days = deals.map(stockDays).filter((v): v is number => v != null)
+  const avgStockDays = days.length > 0 ? Math.round((days.reduce((s, v) => s + v, 0) / days.length) * 10) / 10 : 0
+  const turnoverRate = avgStockDays > 0 ? Math.round((365 / avgStockDays) * 10) / 10 : 0
+  return { count: deals.length, revenueYen, costYen, profitYen, marginPct, avgStockDays, turnoverRate }
 }
 
 /** 販売実績サマリ（全体 or 加盟店別）。 */
