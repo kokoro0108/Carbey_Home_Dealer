@@ -30,6 +30,15 @@ export const INVOICE_STATUS_LABEL: Record<InvoiceStatus, string> = {
   cancelled: '取消',
 }
 
+export const INVOICE_STATUS_TONE: Record<InvoiceStatus, string> = {
+  unbilled: 'bg-slate-100 text-slate-600',
+  billed: 'bg-amber-50 text-amber-700',
+  partial: 'bg-sky-50 text-sky-700',
+  paid: 'bg-green-50 text-green-700',
+  overdue: 'bg-red-50 text-red-700',
+  cancelled: 'bg-slate-100 text-slate-400',
+}
+
 /** 期限超過かつ未入金の請求を overdue に更新する（本部ダッシュボード表示前に呼ぶ／PAY-04）。 */
 export async function refreshOverdue(): Promise<void> {
   const supabase = createServiceRoleClient()
@@ -47,6 +56,27 @@ export async function listInvoices(memberId: string): Promise<InvoiceRow[]> {
     .order('created_at', { ascending: false })
   if (error) throw new Error(error.message)
   return (data ?? []) as unknown as InvoiceRow[]
+}
+
+/** 全加盟店の請求一覧（加盟店名つき・新しい順）。請求・入金管理の横断ページ用。status で絞込可。 */
+export type InvoiceWithMember = InvoiceRow & { member: { id: string; member_name: string; company_name: string | null } | null }
+
+export async function listAllInvoices(status?: InvoiceStatus): Promise<InvoiceWithMember[]> {
+  await refreshOverdue()
+  const supabase = createServiceRoleClient()
+  let q = supabase
+    .from('invoices')
+    .select('*, member:members(id, member_name, company_name)')
+    .order('created_at', { ascending: false })
+  if (status) q = q.eq('status', status)
+  const { data, error } = await q
+  if (error) throw new Error(error.message)
+  return (data ?? []) as unknown as InvoiceWithMember[]
+}
+
+/** 全加盟店の請求サマリ（請求総額・入金済・未収・遅延件数）。横断ページ用。 */
+export function summarizeInvoices(invoices: InvoiceRow[]): BillingSummary {
+  return summarize(invoices)
 }
 
 /** 加盟店ごとの請求サマリ（未収額・遅延件数）。会員一覧・ダッシュボード用。 */
